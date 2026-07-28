@@ -1,0 +1,29 @@
+# ---- Secrets ----
+# Real env files (commit the .example versions instead)
+.env
+.env.*
+!.env.example
+!*.env.example
+
+# Traefik ACME store — contains account + certificate PRIVATE KEYS
+traefik/letsencrypt/
+traefik/acme.json
+
+# SearXNG runtime settings — contains server.secret_key
+SearXNG/core-config/settings.yml
+
+# ---- Local / OS noise ----
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# ---- Editors ----
+.vscode/
+.idea/
+
+# ---- Models & data (never commit weights) ----
+models/
+*.gguf
+*.safetensors
+*.bin

@@ -1,0 +1,51 @@
+version: "3.9"
+
+services:
+  traefik:
+    image: traefik:v3.7.8
+    container_name: traefik-frontend2
+    restart: unless-stopped
+
+    command:
+      # Enable file provider
+      - "--providers.file.filename=/etc/traefik/proxies.yml"
+
+      # Entry points
+      - "--entrypoints.port443.address=:443"
+      - "--entrypoints.lmstudio.address=:10001"
+      - "--entrypoints.mcpgateway.address=:10002"
+      - "--entrypoints.searxng.address=:10003"
+
+      # ACME
+      - "--certificatesresolvers.letsencrypt.acme.email=admin@ham51.com"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare"
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge.delaybeforecheck=60"
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53"
+    
+    env_file:
+      - .env
+
+    #environment:
+    #  - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    ports:
+      - "443:443"
+      - "10001:10001"
+      - "10002:10002"
+      - "10003:10003"
+
+    volumes:
+      - "./proxies.yml:/etc/traefik/proxies.yml:ro"
+      - "./letsencrypt:/letsencrypt"
+
+    networks:
+      - ai-lab
+
+networks:
+  ai-lab:
+    name: AI-LAB

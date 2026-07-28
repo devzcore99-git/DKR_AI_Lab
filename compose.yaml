@@ -1,0 +1,5 @@
+include:
+  - ./traefik/compose.yml
+  - ./open-webui/compose.yml
+  - ./SearXNG/compose.yml
+  - ./llama.cpp/compose.yml

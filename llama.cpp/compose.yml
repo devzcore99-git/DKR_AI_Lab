@@ -1,0 +1,70 @@
+
+services:
+
+  llama-gpt-oss:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: llama-gpt-oss-20b
+    restart: unless-stopped
+
+    # GPU access
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities:
+                - gpu
+
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+
+    volumes:
+      # Windows example:
+      # C:\docker\llama-gpt-oss\models
+      # becomes:
+      - C:\Users\ahill\.lmstudio\models\lmstudio-community:/models
+
+    #ports:
+    #  - "9010:9010"
+
+    command:
+      # Model
+      - "--model"
+      - "/models/gpt-oss-20b-GGUF/gpt-oss-20b-MXFP4.gguf"
+
+      # OpenAI-compatible API listener
+      - "--host"
+      - "0.0.0.0"
+
+      - "--port"
+      - "9010"
+
+      # GPU offload
+      - "--n-gpu-layers"
+      - "999"
+
+      # Context size
+      - "--ctx-size"
+      - "16384"
+
+      # Batch size
+      - "--batch-size"
+      - "512"
+
+      # Allow multiple simultaneous requests
+      - "--parallel"
+      - "2"
+
+      # Use Chat Template from model
+      - "--jinja"
+
+      # Logging
+      - "--verbose"
+
+    networks:
+      - ai-lab
+
+
+networks:
+  ai-lab:

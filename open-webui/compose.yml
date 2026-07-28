@@ -1,0 +1,21 @@
+
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    #ports:
+    #  - "3000:8080"
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - open-webui2:/app/backend/data
+    networks:
+      - ai-lab
+
+volumes:
+  open-webui2:
+
+networks:
+  ai-lab:
+    name: AI-LAB

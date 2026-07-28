@@ -1,0 +1,34 @@
+
+services:
+
+  searxng:
+  #  container_name: searxng-core
+    image: docker.io/searxng/searxng:latest
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - 9001:8080
+    volumes:
+      - ./core-config/:/etc/searxng/:Z
+      - searxng-core-data:/var/cache/searxng/
+    networks:
+    - ai-lab
+
+  searxng-valkey:
+    container_name: searxng-valkey
+    image: docker.io/valkey/valkey:9-alpine
+    command: valkey-server --save 30 1 --loglevel warning
+    restart: always
+    volumes:
+      - searxng-valkey-data:/data/
+
+
+volumes:
+  searxng-core-data:
+  searxng-valkey-data:
+
+
+networks:
+  ai-lab:
+    name: AI-LAB

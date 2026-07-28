@@ -1,0 +1,71 @@
+http:
+  routers:
+
+    openwebui:
+      entryPoints:
+        - port443
+      rule: "Host(`oracle.ham51.com`) && PathPrefix(`/`)"
+      tls:
+        certResolver: letsencrypt
+      service: openwebui-service
+
+    lmstudio:
+      entryPoints:
+        - port443
+      rule: "Host(`lmstudio.ham51.com`)"
+      tls:
+        certResolver: letsencrypt
+      service: lmstudio-service
+
+    mcpgateway:
+      entryPoints:
+        - port443
+      rule: "Host(`mcp.ham51.com`)"
+      tls:
+        certResolver: letsencrypt
+      service: mcpgateway-service
+    
+    searxng:
+      entryPoints:
+        - port443
+      rule: "Host(`search.ham51.com`)"
+      tls:
+        certResolver: letsencrypt
+      service: searxng-service
+
+    llamacpp:
+      entryPoints:
+        - port443
+      rule: "Host(`llm.ham51.com`)"
+      tls:
+        certResolver: letsencrypt
+      service: llamacpp-service
+
+
+
+  services:
+
+    openwebui-service:
+      loadBalancer:
+        servers:
+          - url: "http://open-webui:8080"
+
+    lmstudio-service:
+      loadBalancer:
+        servers:
+          - url: "http://host.docker.internal:12111"
+    
+    mcpgateway-service:
+      loadBalancer:
+        servers:
+          - url: "http://host.docker.internal:9000"
+
+    searxng-service:
+      loadBalancer:
+        servers:
+          - url: "http://searxng:8080"
+
+    llamacpp-service:
+      loadBalancer:
+        servers:
+          - url: "http://llama-gpt-oss:9010"
