@@ -1,0 +1,8 @@
+{
+  "name": "ChatLLM",
+  "included_tools": [
+    "brave-search__brave_web_search",
+    "fetch__fetch"
+  ],
+  "description": ""
+}

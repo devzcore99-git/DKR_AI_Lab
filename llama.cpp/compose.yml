@@ -68,3 +68,7 @@ services:
 
 networks:
   ai-lab:
+    # Without this the container joins a project-prefixed network (dkr_ai_lab_ai-lab)
+    # that Traefik is not on, and llm.ham51.com cannot reach it. Every other service
+    # file sets the same name, which is what makes them one shared network.
+    name: AI-LAB

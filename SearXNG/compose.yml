@@ -7,6 +7,13 @@ services:
     restart: always
     env_file:
       - .env
+    environment:
+      # The image ships `valkey: url: false` in its default settings.yml, so the
+      # cache is off unless something turns it on. Set here rather than in
+      # core-config/settings.yml because that file is gitignored — this is plumbing,
+      # not a secret. Note `environment:` wins over `env_file:`, so overriding this
+      # means editing here, not .env.
+      SEARXNG_VALKEY_URL: valkey://searxng-valkey:6379/0
     ports:
       - 9001:8080
     volumes:
@@ -22,6 +29,11 @@ services:
     restart: always
     volumes:
       - searxng-valkey-data:/data/
+    # Without this the container lands on the project default bridge, where
+    # searxng cannot resolve it. No ports are published — the cache is reachable
+    # only from AI-LAB, which is the intent.
+    networks:
+      - ai-lab
 
 
 volumes:
