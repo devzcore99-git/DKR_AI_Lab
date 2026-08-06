@@ -1,12 +1,93 @@
+# llama.cpp — GPU inference server, OpenAI-compatible.
+#
+# Two definitions of the same server, one per GPU backend, selected by Compose
+# profile. Neither starts unless COMPOSE_PROFILES names its profile, so a host with
+# no GPU story at all brings up the rest of the lab and simply skips this one.
+#
+#   ./detect-gpu.sh          picks a profile and writes it to the ROOT .env
+#   COMPOSE_PROFILES=cuda    NVIDIA + Container Toolkit
+#   COMPOSE_PROFILES=vulkan  anything else with a /dev/dri render node (AMD, Intel)
+#
+# COMPOSE_PROFILES must live in the *root* .env, not llama.cpp/.env — Compose reads
+# it per project, and a copy in this directory is silently ignored, leaving both
+# services inactive with no error. Everything else below is ordinary interpolation
+# and does come from llama.cpp/.env.
+#
+# The split exists because the backends differ below the image tag: CUDA needs a
+# `deploy.resources.reservations.devices` block, Vulkan needs /dev/dri passed
+# through. Compose can substitute values but cannot conditionally include a block,
+# so one service definition cannot cover both.
+
+x-llama-common: &llama-common
+  restart: unless-stopped
+
+  volumes:
+    # Host directory of GGUF weights, read-only — the server never writes here.
+    - "${LLAMA_MODELS_DIR:?set LLAMA_MODELS_DIR in llama.cpp/.env}:/models:ro"
+
+  #ports:
+  #  - "9010:9010"
+
+  command:
+    # Model, relative to LLAMA_MODELS_DIR
+    - "--model"
+    - "/models/${LLAMA_MODEL:?set LLAMA_MODEL in llama.cpp/.env}"
+
+    # OpenAI-compatible API listener
+    - "--host"
+    - "0.0.0.0"
+
+    - "--port"
+    - "9010"
+
+    # Layers to offload to the GPU; 999 means all of them
+    - "--n-gpu-layers"
+    - "${LLAMA_NGL:-999}"
+
+    # Context size
+    - "--ctx-size"
+    - "${LLAMA_CTX:-16384}"
+
+    # Batch size
+    - "--batch-size"
+    - "512"
+
+    # Allow multiple simultaneous requests
+    - "--parallel"
+    - "2"
+
+    # Use Chat Template from model
+    - "--jinja"
+
+  # The image's own HEALTHCHECK curls port 8080, its default. We serve on 9010, so
+  # without this override the container reports unhealthy forever while working
+  # perfectly. start_period covers model load — a big model on a slow disk takes a
+  # while, and failures during that window are not counted.
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9010/health"]
+    interval: 30s
+    timeout: 5s
+    retries: 5
+    start_period: 180s
+
+  networks:
+    ai-lab:
+      # Both variants answer to the same name, so traefik/proxies.yml can point at
+      # http://llama-gpt-oss:9010 without knowing which backend is running.
+      aliases:
+        - llama-gpt-oss
 
 services:
 
-  llama-gpt-oss:
+  llama-cuda:
+    <<: *llama-common
+    profiles: [cuda]
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
-    container_name: llama-gpt-oss-20b
-    restart: unless-stopped
-
-    # GPU access
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+    # Requires the NVIDIA Container Toolkit. Without it the daemon refuses the
+    # container outright — "could not select device driver nvidia with capabilities
+    # [[gpu]]" — which is why detect-gpu.sh tests for the runtime, not the hardware.
     deploy:
       resources:
         reservations:
@@ -16,55 +97,19 @@ services:
               capabilities:
                 - gpu
 
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-
-    volumes:
-      # Windows example:
-      # C:\docker\llama-gpt-oss\models
-      # becomes:
-      - C:\Users\ahill\.lmstudio\models\lmstudio-community:/models
-
-    #ports:
-    #  - "9010:9010"
-
-    command:
-      # Model
-      - "--model"
-      - "/models/gpt-oss-20b-GGUF/gpt-oss-20b-MXFP4.gguf"
-
-      # OpenAI-compatible API listener
-      - "--host"
-      - "0.0.0.0"
-
-      - "--port"
-      - "9010"
-
-      # GPU offload
-      - "--n-gpu-layers"
-      - "999"
-
-      # Context size
-      - "--ctx-size"
-      - "16384"
-
-      # Batch size
-      - "--batch-size"
-      - "512"
-
-      # Allow multiple simultaneous requests
-      - "--parallel"
-      - "2"
-
-      # Use Chat Template from model
-      - "--jinja"
-
-      # Logging
-      - "--verbose"
-
-    networks:
-      - ai-lab
-
+  llama-vulkan:
+    <<: *llama-common
+    profiles: [vulkan]
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan
+    # Mesa's Vulkan drivers ship inside the image; all the host hands over is the
+    # render node. No NVIDIA runtime, no Container Toolkit.
+    devices:
+      - "/dev/dri:/dev/dri"
+    # The image runs as root, which already has access to /dev/dri/renderD128
+    # (crw-rw---- root:render). If you rebuild it to run as a non-root user, add the
+    # host's `render` group id:
+    # group_add:
+    #   - "${RENDER_GID:-993}"
 
 networks:
   ai-lab:
