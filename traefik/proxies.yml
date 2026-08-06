@@ -58,7 +58,7 @@ http:
     mcpgateway-service:
       loadBalancer:
         servers:
-          - url: "http://host.docker.internal:9000"
+          - url: "http://mcpjungle:8080"
 
     searxng-service:
       loadBalancer:

@@ -1,0 +1,11 @@
+{
+  "name": "MicrosoftExpert",
+  "included_tools": [
+    "brave-search__brave_web_search",
+    "fetch__fetch",
+    "MicrosoftLearnMCP__microsoft_code_sample_search",
+    "MicrosoftLearnMCP__microsoft_docs_fetch",
+    "MicrosoftLearnMCP__microsoft_docs_search"
+  ],
+  "description": ""
+}

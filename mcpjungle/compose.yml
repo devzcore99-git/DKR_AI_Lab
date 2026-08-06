@@ -1,0 +1,320 @@
+# MCPJungle — MCP gateway and registry for the AI lab.
+#
+# Included from the root `compose.yaml`; run everything from the project root.
+# Compose `include:` resolves this file's relative paths (./mcp-servers,
+# ./tool-groups, the `.:/host` mount) and its interpolation `.env` against THIS
+# directory, not the project root — so secrets go in `mcpjungle/.env`.
+#
+# Two networks on purpose:
+#   MCPJUNGLE  private — db and the individual MCP servers, unauthenticated
+#              endpoints that nothing outside this stack should reach
+#   AI-LAB     shared  — joined by the `mcpjungle` gateway alone, so Traefik can
+#              route mcp.ham51.com to it and Open WebUI can use it as a tool source
+services:
+  mcpjungle-db:
+    image: postgres:17
+    container_name: mcpjungle-db
+    environment:
+      POSTGRES_USER: mcpjungle
+      POSTGRES_PASSWORD: mcpjungle
+      POSTGRES_DB: mcpjungle
+    #ports:
+    #  - "5432:5432"
+    volumes:
+      - mcpjungle-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=mcpjungle pg_isready -U mcpjungle"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - mcpjungle
+
+  mcpjungle:
+    image: ghcr.io/mcpjungle/mcpjungle:${MCPJUNGLE_IMAGE_TAG:-latest-stdio}
+    container_name: mcpjungle-server
+    environment:
+      DATABASE_URL: postgres://mcpjungle:mcpjungle@mcpjungle-db:5432/mcpjungle
+      SERVER_MODE: ${SERVER_MODE:-development}
+      OTEL_ENABLED: ${OTEL_ENABLED:-false}
+      MCP_SERVER_INIT_REQ_TIMEOUT_SEC: ${MCP_SERVER_INIT_REQ_TIMEOUT_SEC:-10}
+    # Traefik fronts this at https://mcp.ham51.com, but the port stays published:
+    # the `mcpjungle` CLI on the host talks to http://localhost:8080 directly.
+    ports:
+      - "${HOST_PORT:-8080}:8080"
+    volumes:
+      # Mount this service directory to enable filesystem MCP server access.
+      # Other options:
+      # - ${HOME}:/host/home:ro
+      # - /tmp:/host/tmp:rw
+      - .:/host:ro
+      # Persist the uv package cache. stdio servers are spawned via `uvx`, which would
+      # otherwise re-download the package on every container restart.
+      - mcpjungle-uv-cache:/root/.cache/uv
+    depends_on:
+      mcpjungle-db:
+        condition: service_healthy
+    # Deliberately does NOT depend on brave-search: the gateway should still come up
+    # if Brave is misconfigured or down. Ordering for registration is handled by the
+    # mcpjungle-register-brave job below.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: always
+    networks:
+      - mcpjungle
+      - ai-lab
+
+  # One-shot job: registers brave-search with mcpjungle, then exits.
+  # Reuses the mcpjungle image, which ships the CLI at /mcpjungle alongside the server.
+  #
+  # --force makes this idempotent: on every `up` it de-registers any existing
+  # brave-search entry and re-registers it, so restarts and image bumps converge
+  # instead of failing on "already exists".
+  mcpjungle-register-brave:
+    image: ghcr.io/mcpjungle/mcpjungle:${MCPJUNGLE_IMAGE_TAG:-latest-stdio}
+    container_name: mcpjungle-register-brave
+    entrypoint: ["/mcpjungle"]
+    command:
+      - register
+      - --registry=http://mcpjungle:8080
+      - --name=brave-search
+      - --url=http://brave-search:9001/mcp
+      - --description=Brave Search API - web, image, video, news and local search
+      - --force
+    depends_on:
+      mcpjungle:
+        condition: service_healthy
+      brave-search:
+        condition: service_healthy
+    # One-shot, not a service. Registration is only attempted after both
+    # dependencies report healthy, so a failure here is a real error worth
+    # surfacing rather than retrying forever.
+    restart: "no"
+    networks:
+      - mcpjungle
+
+  # One-shot job: registers the reference `fetch` MCP server, then exits.
+  #
+  # Unlike brave-search, fetch has no HTTP transport — `mcp-server-fetch` accepts only
+  # --user-agent / --ignore-robots-txt / --proxy-url, so it cannot run as a standalone
+  # HTTP container. It is registered as a stdio server instead, and mcpjungle spawns
+  # `uvx mcp-server-fetch` as a subprocess inside its own container. This is what the
+  # `-stdio` image tag is for; it ships uvx and python3.
+  #
+  # stdio servers cannot be registered with flags — the CLI requires a config file.
+  mcpjungle-register-fetch:
+    image: ghcr.io/mcpjungle/mcpjungle:${MCPJUNGLE_IMAGE_TAG:-latest-stdio}
+    container_name: mcpjungle-register-fetch
+    entrypoint: ["/mcpjungle"]
+    command:
+      - register
+      - --registry=http://mcpjungle:8080
+      - --conf=/conf/fetch.json
+      - --force
+    volumes:
+      - ./mcp-servers:/conf:ro
+    depends_on:
+      mcpjungle:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - mcpjungle
+
+  # One-shot job: registers context7 with mcpjungle, then exits.
+  # Same --force idempotency as the brave-search registration above.
+  mcpjungle-register-context7:
+    image: ghcr.io/mcpjungle/mcpjungle:${MCPJUNGLE_IMAGE_TAG:-latest-stdio}
+    container_name: mcpjungle-register-context7
+    entrypoint: ["/mcpjungle"]
+    command:
+      - register
+      - --registry=http://mcpjungle:8080
+      - --name=context7
+      - --url=http://context7:9002/mcp
+      - --description=Context7 - up-to-date documentation and code examples for any library
+      - --force
+    depends_on:
+      mcpjungle:
+        condition: service_healthy
+      context7:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - mcpjungle
+
+  # One-shot job: registers Microsoft Learn with mcpjungle, then exits.
+  #
+  # Unlike every other entry here, this one has no container of its own — Microsoft
+  # hosts the server publicly at learn.microsoft.com/api/mcp, so there is nothing to
+  # run locally and the job gates on mcpjungle alone. It exists purely so the
+  # registration is reproducible: without it, the entry lives only in Postgres and
+  # vanishes the first time the db volume is recreated.
+  #
+  # The endpoint is unauthenticated, so no --bearer-token is needed.
+  mcpjungle-register-microsoft-learn:
+    image: ghcr.io/mcpjungle/mcpjungle:${MCPJUNGLE_IMAGE_TAG:-latest-stdio}
+    container_name: mcpjungle-register-microsoft-learn
+    entrypoint: ["/mcpjungle"]
+    command:
+      - register
+      - --registry=http://mcpjungle:8080
+      # Server names cannot contain whitespace or consecutive underscores. This one is
+      # camelCase rather than kebab-case to match the pre-existing manual registration,
+      # so --force updates that entry instead of leaving a duplicate behind.
+      - --name=MicrosoftLearnMCP
+      - --url=https://learn.microsoft.com/api/mcp
+      - --description=Microsoft Learn - official Microsoft/Azure documentation search, page fetch and code samples
+      - --force
+    depends_on:
+      mcpjungle:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - mcpjungle
+
+  # One-shot job: creates the tool groups in ./tool-groups, then exits.
+  #
+  # A group is a curated subset of the gateway's tools, served at its own endpoint
+  # (/v0/groups/{name}/mcp), so a client sees only the handful of tools it needs
+  # instead of all 14. The JSON files were produced by `mcpjungle export` and can be
+  # regenerated the same way after editing groups by hand.
+  #
+  # Idempotency works differently here than for `register`: the group commands have no
+  # --force, `create` fails with a duplicate-key error if the group exists, and
+  # `update` fails if it does not. So the loop branches on `get group`, which exits 1
+  # when a group is missing. `update` fully overrides the stored config, which is what
+  # makes these files the source of truth rather than the database.
+  #
+  # The branch keys off the filename, matching `mcpjungle export`'s own <name>.json
+  # convention. The `|| update` fallback covers a file whose name has drifted from the
+  # group name inside it — without it, that case would fail the whole job.
+  #
+  # /bin/sh here is dash, so the script stays POSIX — no bashisms.
+  mcpjungle-create-groups:
+    image: ghcr.io/mcpjungle/mcpjungle:${MCPJUNGLE_IMAGE_TAG:-latest-stdio}
+    container_name: mcpjungle-create-groups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        REG=http://mcpjungle:8080
+        for f in /groups/*.json; do
+          name=$$(basename "$$f" .json)
+          echo "==> $$name"
+          if /mcpjungle get group "$$name" --registry=$$REG >/dev/null 2>&1; then
+            /mcpjungle update group --registry=$$REG --conf "$$f"
+          else
+            /mcpjungle create group --registry=$$REG --conf "$$f" \
+              || /mcpjungle update group --registry=$$REG --conf "$$f"
+          fi
+        done
+    volumes:
+      - ./tool-groups:/groups:ro
+    # Groups are validated against the live tool registry — referencing a tool that is
+    # not yet registered fails with "tool ... does not exist or is disabled". So this
+    # job must wait for every registration job to finish, not merely for the gateway to
+    # be healthy. Add a dependency here whenever a new register job is added above.
+    depends_on:
+      mcpjungle:
+        condition: service_healthy
+      mcpjungle-register-brave:
+        condition: service_completed_successfully
+      mcpjungle-register-fetch:
+        condition: service_completed_successfully
+      mcpjungle-register-context7:
+        condition: service_completed_successfully
+      mcpjungle-register-microsoft-learn:
+        condition: service_completed_successfully
+    restart: "no"
+    networks:
+      - mcpjungle
+
+  # Brave Search MCP server (https://github.com/brave/brave-search-mcp-server),
+  # running as a standalone streamable-HTTP server rather than a stdio subprocess.
+  # Registered with mcpjungle automatically by mcpjungle-register-brave above.
+  brave-search:
+    image: mcp/brave-search:latest
+    container_name: mcpjungle-brave-search
+    environment:
+      # Required. Set in `mcpjungle/.env`, which is gitignored — see .env.example.
+      BRAVE_API_KEY: ${BRAVE_API_KEY:?BRAVE_API_KEY must be set (put it in mcpjungle/.env)}
+      # The image defaults to stdio; http transport must be requested explicitly.
+      BRAVE_MCP_TRANSPORT: http
+      # MUST be 0.0.0.0. This binds only inside the container's own network namespace,
+      # and no host port is published below, so the listener is still reachable only
+      # from the private MCPJUNGLE network — not from the host or the outside world.
+      # Setting this to 127.0.0.1 makes the server unreachable from mcpjungle while
+      # the healthcheck (which runs inside this container) still reports healthy.
+      BRAVE_MCP_HOST: 0.0.0.0
+      BRAVE_MCP_PORT: 9001
+      BRAVE_MCP_LOG_LEVEL: ${BRAVE_MCP_LOG_LEVEL:-info}
+    # The MCP endpoint is unauthenticated, so it is deliberately NOT published to the
+    # host by default — only the MCPJUNGLE network can reach it. Uncomment to probe it
+    # directly from the host, and pick a port other than 9001: SearXNG already
+    # publishes that one.
+    # ports:
+    #   - "${BRAVE_HOST_PORT:-9011}:9001"
+    healthcheck:
+      # The image has wget but no curl. A 400 from a bare GET still proves the
+      # listener is up, so treat any HTTP response as healthy.
+      test: ["CMD-SHELL", "wget -q -S -O /dev/null http://127.0.0.1:9001/mcp 2>&1 | grep -q 'HTTP/'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - mcpjungle
+
+  # Context7 MCP server (https://github.com/upstash/context7). Unlike brave-search,
+  # this image needs no coaxing into HTTP mode — the Docker MCP catalog build already
+  # defaults to MCP_TRANSPORT=http and serves streamable HTTP at /mcp (plus legacy SSE
+  # at /sse). Only PORT is overridden below, to keep it off 8080 alongside mcpjungle.
+  #
+  # No API key: this build (server version 1.0.13) reads only MCP_TRANSPORT, PORT and
+  # DEFAULT_MINIMUM_TOKENS, and calls the public context7.com API anonymously. That
+  # tier is rate-limited; newer upstream releases accept CONTEXT7_API_KEY, so revisit
+  # this if the image is ever bumped and the limits start to bite.
+  context7:
+    image: mcp/context7:latest
+    container_name: mcpjungle-context7
+    environment:
+      MCP_TRANSPORT: http
+      PORT: 9002
+      # Minimum documentation tokens `get-library-docs` will return, regardless of a
+      # smaller `tokens` argument from the caller.
+      DEFAULT_MINIMUM_TOKENS: ${CONTEXT7_MIN_TOKENS:-10000}
+    # Unauthenticated endpoint, same reasoning as brave-search: reachable only from the
+    # private MCPJUNGLE network. Uncomment to probe it directly from the host.
+    # ports:
+    #   - "${CONTEXT7_HOST_PORT:-9002}:9002"
+    healthcheck:
+      # node:22 base — wget, no curl. A bare GET on /mcp returns 406 (the endpoint
+      # requires an Accept of text/event-stream), which is still proof the listener
+      # is up, so treat any HTTP response as healthy.
+      test: ["CMD-SHELL", "wget -q -S -O /dev/null http://127.0.0.1:9002/mcp 2>&1 | grep -q 'HTTP/'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - mcpjungle
+
+volumes:
+  mcpjungle-db-data:
+  mcpjungle-uv-cache:
+
+networks:
+  # Private to this stack. Named explicitly for the same reason the other services
+  # name AI-LAB: an unnamed network silently picks up the project prefix, and which
+  # network a container lands on is the difference between working and not.
+  mcpjungle:
+    name: MCPJUNGLE
+  ai-lab:
+    name: AI-LAB

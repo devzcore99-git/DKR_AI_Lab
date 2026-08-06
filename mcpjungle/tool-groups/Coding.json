@@ -1,0 +1,10 @@
+{
+  "name": "Coding",
+  "included_tools": [
+    "brave-search__brave_web_search",
+    "fetch__fetch",
+    "context7__get-library-docs",
+    "context7__resolve-library-id"
+  ],
+  "description": ""
+}

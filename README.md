@@ -9,12 +9,17 @@ single Traefik reverse proxy with automatic Let's Encrypt TLS.
 | **Open WebUI** | Chat front-end for OpenAI-compatible models | `https://oracle.ham51.com` |
 | **llama.cpp** | GPU inference server (`gpt-oss-20b`, OpenAI-compatible API) | `https://llm.ham51.com` |
 | **SearXNG** | Private metasearch engine, usable as Open WebUI's web-search backend | `https://search.ham51.com` |
+| **MCPJungle** | MCP gateway + registry — one endpoint fronting several MCP servers | `https://mcp.ham51.com` |
 | **LM Studio** | Runs on the *host*, not in Docker — proxied through Traefik | `https://lmstudio.ham51.com` |
-| **MCP Gateway** | Runs on the *host*, not in Docker — proxied through Traefik | `https://mcp.ham51.com` |
 
 All containers share an external-style Docker network named `AI-LAB`, so they
 address each other by service name (e.g. `http://searxng:8080`). Host-side
 services are reached via `host.docker.internal`.
+
+MCPJungle's own backing services (Postgres and the individual MCP servers) sit on
+a second, private network named `MCPJUNGLE`. Only the gateway itself joins both,
+which is what lets Traefik and Open WebUI reach it while the unauthenticated MCP
+servers behind it stay unreachable from the rest of the lab.
 
 ---
 
@@ -36,6 +41,12 @@ SearXNG/
   core-config/settings.yml        # instance settings, secret_key       (gitignored)
 llama.cpp/
   compose.yml                     # CUDA llama.cpp server
+mcpjungle/
+  compose.yml                     # gateway + Postgres + MCP servers + registration jobs
+  compose-prod.yml                # standalone enterprise-mode variant (not included)
+  .env                            # BRAVE_API_KEY                       (gitignored)
+  mcp-servers/*.json              # stdio server definitions to register
+  tool-groups/*.json              # curated tool subsets, one file per group
 ```
 
 Anything marked *gitignored* has a committed `.example` sibling.
@@ -48,7 +59,7 @@ Anything marked *gitignored* has a committed `.example` sibling.
 - An NVIDIA GPU + NVIDIA Container Toolkit (for `llama.cpp`)
 - A domain in Cloudflare — TLS certs are issued via the ACME **DNS-01** challenge,
   so no port 80 exposure is needed, and wildcard/internal-only hosts work fine
-- Ports free on the host: `443`, `9001`, `10001`, `10002`, `10003`
+- Ports free on the host: `443`, `8080`, `9001`, `10001`, `10002`, `10003`
 
 ---
 
@@ -61,6 +72,7 @@ cp traefik/.env.example      traefik/.env
 cp open-webui/.env.example   open-webui/.env
 cp SearXNG/.env.example      SearXNG/.env
 cp SearXNG/core-config/settings.yml.example SearXNG/core-config/settings.yml
+cp mcpjungle/.env.example    mcpjungle/.env
 ```
 
 **2. Fill in the secrets**
@@ -72,6 +84,7 @@ cp SearXNG/core-config/settings.yml.example SearXNG/core-config/settings.yml
 | `open-webui/.env` | `WEBUI_SECRET_KEY` | `openssl rand -base64 32` |
 | `open-webui/.env` | `BRAVE_SEARCH_API_KEY` | https://api-dashboard.search.brave.com/ (omit if using SearXNG) |
 | `SearXNG/core-config/settings.yml` | `server.secret_key` | `openssl rand -hex 16` |
+| `mcpjungle/.env` | `BRAVE_API_KEY` | https://api-dashboard.search.brave.com/ — separate from Open WebUI's copy; the gateway's Brave MCP server needs its own |
 
 **3. Point DNS at the host**
 
@@ -123,7 +136,55 @@ docker compose down -v
 ```
 
 Persistent state lives in named volumes: `open-webui2` (chats, users, settings),
-`searxng-core-data`, `searxng-valkey-data`.
+`searxng-core-data`, `searxng-valkey-data`, `mcpjungle-db-data` (the MCP registry),
+`mcpjungle-uv-cache`.
+
+---
+
+## The MCP gateway
+
+MCPJungle registers several MCP servers and re-serves them as one endpoint, so a
+client points at the gateway instead of wiring up each server itself.
+
+| Registered server | Runs as | Notes |
+| --- | --- | --- |
+| `brave-search` | container on `MCPJUNGLE` | needs `BRAVE_API_KEY` |
+| `context7` | container on `MCPJUNGLE` | library docs; anonymous, rate-limited |
+| `fetch` | stdio subprocess inside the gateway | URL → markdown |
+| `MicrosoftLearnMCP` | remote, `learn.microsoft.com` | nothing runs locally |
+
+Registration is not stored in the compose file's head — it is applied by one-shot
+`mcpjungle-register-*` jobs that run on every `up` and exit. They use `--force`, so
+they converge rather than fail on "already exists", and the registry survives a
+wiped `mcpjungle-db-data` volume because bringing the stack back up re-applies them.
+
+A **tool group** is a curated subset of the gateway's tools with its own endpoint,
+`/v0/groups/<name>/mcp` — point a client at one and it sees five tools instead of
+all fourteen. Groups live in `mcpjungle/tool-groups/*.json`, one file per group,
+and `mcpjungle-create-groups` applies them after every registration job finishes.
+Those files are the source of truth: the job fully overwrites the stored config.
+
+The CLI ships inside the image at `/mcpjungle`, so no host install is needed:
+
+```sh
+# What is registered right now
+docker compose exec mcpjungle /mcpjungle list servers
+
+# Re-apply the JSON files after editing them (each job is idempotent)
+docker compose up -d mcpjungle-register-brave mcpjungle-create-groups
+
+# Why a registration failed
+docker compose logs mcpjungle-register-fetch mcpjungle-create-groups
+```
+
+The group files were generated by `mcpjungle export`, and editing a group through
+the API rather than the file is fine — just export it back over the JSON, or the
+next `up` will overwrite your change with the file's contents.
+
+Adding a server means adding a `mcpjungle-register-<name>` job to
+`mcpjungle/compose.yml` **and** listing it in `mcpjungle-create-groups`'
+`depends_on` — groups are validated against the live registry, so a group naming a
+tool that has not been registered yet fails the whole job.
 
 ---
 
@@ -151,8 +212,8 @@ Persistent state lives in named volumes: `open-webui2` (chats, users, settings),
 3. Create the DNS record, then `docker compose up -d`.
 
 For something running on the host rather than in Docker, use
-`http://host.docker.internal:<port>` as the server URL — that's how LM Studio
-and the MCP Gateway are wired.
+`http://host.docker.internal:<port>` as the server URL — that's how LM Studio is
+wired.
 
 ---
 
@@ -171,6 +232,12 @@ and the MCP Gateway are wired.
   shared one; add the `name:` key to match.
 - **SearXNG publishes `9001:8080` directly** in addition to being proxied, which
   bypasses TLS. Drop the `ports:` block if you only want access via Traefik.
+- **MCPJungle runs in `development` mode**, which means no authentication, and it
+  publishes `8080` on the host on top of being proxied at `mcp.ham51.com`. Anyone
+  who can reach either can call every registered tool. Set `SERVER_MODE=enterprise`
+  in `mcpjungle/.env` before exposing it beyond a trusted network.
+- **The gateway mounts `mcpjungle/` at `/host:ro`** so filesystem MCP servers have
+  something to read. Widen it to `${HOME}:/host/home:ro` only if you mean to.
 
 ---
 

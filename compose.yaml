@@ -3,3 +3,4 @@ include:
   - ./open-webui/compose.yml
   - ./SearXNG/compose.yml
   - ./llama.cpp/compose.yml
+  - ./mcpjungle/compose.yml

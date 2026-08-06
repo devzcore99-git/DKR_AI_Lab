@@ -1,0 +1,11 @@
+{
+  "name": "fetch",
+  "transport": "stdio",
+  "description": "Fetches a URL and converts the HTML to markdown for easier consumption by models. Reference MCP server from modelcontextprotocol/servers.",
+  "command": "uvx",
+  "args": [
+    "--with",
+    "mcp<2",
+    "mcp-server-fetch"
+  ]
+}
