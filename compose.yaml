@@ -2,10 +2,8 @@ include:
   - ./traefik/compose.yml
   - ./open-webui/compose.yml
   - ./SearXNG/compose.yml
-  # Disabled: cannot run on this host. The volume is a literal Windows path, the
-  # NVIDIA driver is absent, and the gpt-oss-20b weights it loads are not present
-  # (~/.lmstudio/models/lmstudio-community has only gemma-4-E4B-it-GGUF). Left
-  # commented rather than deleted — the file is intact and re-enabling is this one
-  # line, plus fixing the `volumes:` path and `--model` argument inside it.
-  # - ./llama.cpp/compose.yml
+  # Defines two profile-gated services, llama-cuda and llama-vulkan. Neither runs
+  # unless COMPOSE_PROFILES (root .env, written by llama.cpp/detect-gpu.sh) names
+  # one, so including this file is safe on a host with no GPU.
+  - ./llama.cpp/compose.yml
   - ./mcpjungle/compose.yml

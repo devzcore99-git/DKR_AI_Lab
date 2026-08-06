@@ -10,14 +10,18 @@ guide; keep it in sync.
 
 ## Conventions
 
-**Bring-up.** The root `compose.yaml` is only an `include:` list of per-service files;
-run every command from the project root (`docker compose up -d`). Four are active
-(`traefik/`, `open-webui/`, `SearXNG/`, `mcpjungle/`); `llama.cpp/` is commented out
-and does not start — see below. Running `docker compose -f <service>/compose.yml` from
-a service directory starts a *separate* project.
-`include:` resolves each file's relative paths *and* its interpolation `.env`
-against that file's own directory — which is why `mcpjungle/.env`, not a root one,
-supplies `BRAVE_API_KEY`.
+**Bring-up.** The root `compose.yaml` is only an `include:` list of five per-service
+files (`traefik/`, `open-webui/`, `SearXNG/`, `llama.cpp/`, `mcpjungle/`); run every
+command from the project root (`docker compose up -d`). Running `docker compose -f
+<service>/compose.yml` from a service directory starts a *separate* project.
+
+**Two kinds of `.env`, and mixing them up fails silently.** `include:` resolves each
+file's relative paths *and* its interpolation `.env` against that file's own directory
+— which is why `mcpjungle/.env` supplies `BRAVE_API_KEY` and `llama.cpp/.env` supplies
+`LLAMA_MODEL`. But `COMPOSE_PROFILES` is read once *per project*, so it only works in
+the root `.env`. Put it in `llama.cpp/.env` and Compose reads the file, ignores the
+variable, and leaves both llama services absent with no error at all. Root `.env` also
+feeds interpolation everywhere as a fallback; service `.env` files do not leak upward.
 
 **State — read this before renaming anything.** `compose.yaml` has no top-level
 `name:`, so Compose derives the project name from the directory basename
@@ -51,15 +55,24 @@ update both in the same commit. Name variables, never values: `CF_DNS_API_TOKEN`
 `server.secret_key`. Brave is keyed twice, from separate files: `open-webui/.env` for
 Open WebUI's own web search, `mcpjungle/.env` for the Brave MCP server.
 
-**llama.cpp is disabled.** Its `include:` line in `compose.yaml` is commented out, so
-`docker compose up -d` no longer tries to start it. Three separate reasons, all of
-which must be dealt with before re-enabling: the `volumes:` entry is a literal Windows
-path (`C:\Users\ahill\.lmstudio\models\lmstudio-community:/models`) that Docker rejects
-outright; this host has no working NVIDIA driver; and `--model` names
-`gpt-oss-20b-GGUF/gpt-oss-20b-MXFP4.gguf`, while `~/.lmstudio/models/lmstudio-community`
-holds only `gemma-4-E4B-it-GGUF`. All three are host-specific; the file's config is
-otherwise correct, including `name: AI-LAB` on its network. `traefik/proxies.yml`
-still routes `llm.ham51.com` to it and will 502 until it is re-enabled.
+**llama.cpp is profile-gated.** `llama.cpp/compose.yml` defines the same server twice
+— `llama-cuda` (profile `cuda`, `server-cuda`, needs the NVIDIA Container Toolkit) and
+`llama-vulkan` (profile `vulkan`, `server-vulkan`, needs a `/dev/dri` render node) —
+sharing everything else through the `x-llama-common` anchor. One definition cannot
+cover both: CUDA needs a `deploy.resources.reservations.devices` block and Vulkan needs
+`devices:`, and interpolation can substitute values but not include a block. Both carry
+the network alias `llama-gpt-oss`, so `traefik/proxies.yml` addresses either without
+change. Neither starts unless `COMPOSE_PROFILES` names its profile; `llama.cpp/detect-gpu.sh`
+writes that to the root `.env`, testing for the *runtime* in `docker info` rather than
+for hardware — this host has a stale `/dev/nvidiactl` and no NVIDIA card, so probing
+`/dev/nvidia*` would pick CUDA and fail at container start.
+
+**Docker Desktop cannot pass through a GPU.** Its containers run in a linuxkit VM with
+no `/dev/dri`, so `llama-vulkan` dies with `error gathering device information while
+adding custom device "/dev/dri"` even though the host has the node. This machine runs
+both a Desktop daemon and a native one; `docker context ls` shows which is active, and
+GPU work needs `default`. Verified on `default`: Vulkan0 = AMD Radeon 880M, and
+`LLAMA_NGL=999` measured 2.9x the prompt throughput of `LLAMA_NGL=0`.
 
 **Broken config, don't copy as a pattern.** `open-webui/.env` writes its four
 web-search lines as YAML `KEY: "value"`, but `env_file:` parses only `KEY=value`, so web
@@ -75,10 +88,11 @@ against the live registry, so an unregistered tool fails the whole group job.
 ## Dependencies
 
 Only `traefik:v3.7.8`, `postgres:17`, and `prom/prometheus:v2.53.0` are pinned;
-`searxng:latest`, `open-webui:main`, `llama.cpp:server-cuda`, `mcpjungle:latest-stdio`,
-`mcp/brave-search:latest`, and `mcp/context7:latest` re-resolve on every pull, so
-rebuilds are not reproducible. llama.cpp needs an NVIDIA GPU and the NVIDIA Container
-Toolkit. MCPJungle needs the `-stdio` image tag specifically — it ships the `uvx` and
+`searxng:latest`, `open-webui:main`, `llama.cpp:server-cuda`, `llama.cpp:server-vulkan`,
+`mcpjungle:latest-stdio`, `mcp/brave-search:latest`, and `mcp/context7:latest`
+re-resolve on every pull, so rebuilds are not reproducible. The llama.cpp images also
+publish `server-rocm` and plain `server` (CPU) if a third profile is ever wanted.
+MCPJungle needs the `-stdio` image tag specifically — it ships the `uvx` and
 `python3` that stdio servers such as `fetch` are spawned with; plain `latest` cannot
 run them.
 
