@@ -58,8 +58,8 @@ Open WebUI's own web search, `mcpjungle/.env` for the Brave MCP server.
 without `name: AI-LAB` (the other three set it), so it joins a project-prefixed network
 Traefik is not on and `llm.ham51.com` cannot reach it. `open-webui/.env` writes its four
 web-search lines as YAML `KEY: "value"`, but `env_file:` parses only `KEY=value`, so web
-search never reaches the container (`.env.example` is correct). `searxng-valkey` declares
-no `networks:`, so SearXNG cannot reach its cache. `recommendations.md` reviews these.
+search never reaches the container (`.env.example` is correct). `recommendations.md`
+reviews these — note its `searxng-valkey` finding is fixed, not open.
 
 **MCP registrations are code, not database rows.** `mcpjungle/mcp-servers/*.json` and
 `mcpjungle/tool-groups/*.json` are the source of truth; the one-shot jobs overwrite
