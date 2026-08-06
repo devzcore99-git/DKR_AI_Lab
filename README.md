@@ -108,10 +108,9 @@ volumes:
 ```
 
 To bring it back, uncomment the include, change that to wherever your models
-actually live, make sure the `--model` argument below it names a file inside that
-directory, and add `name: AI-LAB` to the file's `networks:` block — without it the
-container joins a project-prefixed network Traefik is not on. You also need a
-working NVIDIA driver and the Container Toolkit.
+actually live, and make sure the `--model` argument below it names a file inside
+that directory. You also need a working NVIDIA driver and the Container Toolkit.
+The network is already correct — the file sets `name: AI-LAB` like the others.
 
 **5. Bring it up**
 
@@ -235,11 +234,10 @@ wired.
 - **`WEBUI_AUTH=False`** disables Open WebUI's login entirely while Traefik
   publishes it on a public hostname. Set it to `True` before exposing this
   anywhere untrusted.
-- **`llama.cpp` is commented out of the root `compose.yaml`** and none of its
-  problems are fixed — unrunnable volume path, missing driver, missing weights,
-  and a `networks:` block with no `name: AI-LAB`. Setup step 4 covers what to do
-  before re-enabling it. `traefik/proxies.yml` still routes `llm.ham51.com` at it,
-  so that hostname 502s in the meantime.
+- **`llama.cpp` is commented out of the root `compose.yaml`** and its host-specific
+  problems remain — unrunnable volume path, missing driver, missing weights. Setup
+  step 4 covers what to do before re-enabling it. `traefik/proxies.yml` still routes
+  `llm.ham51.com` at it, so that hostname 502s in the meantime.
 - **SearXNG publishes `9001:8080` directly** in addition to being proxied, which
   bypasses TLS. Drop the `ports:` block if you only want access via Traefik.
 - **MCPJungle runs in `development` mode**, which means no authentication, and it

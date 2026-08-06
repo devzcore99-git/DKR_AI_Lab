@@ -57,10 +57,9 @@ which must be dealt with before re-enabling: the `volumes:` entry is a literal W
 path (`C:\Users\ahill\.lmstudio\models\lmstudio-community:/models`) that Docker rejects
 outright; this host has no working NVIDIA driver; and `--model` names
 `gpt-oss-20b-GGUF/gpt-oss-20b-MXFP4.gguf`, while `~/.lmstudio/models/lmstudio-community`
-holds only `gemma-4-E4B-it-GGUF`. The file also declares `ai-lab` without `name:
-AI-LAB`, which the other files' `name:` currently masks at merge time but which will
-bite as soon as it is included again. `traefik/proxies.yml` still routes
-`llm.ham51.com` to it and will 502 until then.
+holds only `gemma-4-E4B-it-GGUF`. All three are host-specific; the file's config is
+otherwise correct, including `name: AI-LAB` on its network. `traefik/proxies.yml`
+still routes `llm.ham51.com` to it and will 502 until it is re-enabled.
 
 **Broken config, don't copy as a pattern.** `open-webui/.env` writes its four
 web-search lines as YAML `KEY: "value"`, but `env_file:` parses only `KEY=value`, so web
