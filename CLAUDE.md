@@ -10,10 +10,11 @@ guide; keep it in sync.
 
 ## Conventions
 
-**Bring-up.** The root `compose.yaml` is only an `include:` list of five per-service
-files (`traefik/`, `open-webui/`, `SearXNG/`, `llama.cpp/`, `mcpjungle/`); run every
-command from the project root (`docker compose up -d`). Running `docker compose -f
-<service>/compose.yml` from a service directory starts a *separate* project.
+**Bring-up.** The root `compose.yaml` is only an `include:` list of per-service files;
+run every command from the project root (`docker compose up -d`). Four are active
+(`traefik/`, `open-webui/`, `SearXNG/`, `mcpjungle/`); `llama.cpp/` is commented out
+and does not start — see below. Running `docker compose -f <service>/compose.yml` from
+a service directory starts a *separate* project.
 `include:` resolves each file's relative paths *and* its interpolation `.env`
 against that file's own directory — which is why `mcpjungle/.env`, not a root one,
 supplies `BRAVE_API_KEY`.
@@ -50,13 +51,18 @@ update both in the same commit. Name variables, never values: `CF_DNS_API_TOKEN`
 `server.secret_key`. Brave is keyed twice, from separate files: `open-webui/.env` for
 Open WebUI's own web search, `mcpjungle/.env` for the Brave MCP server.
 
-**Model weights.** `llama.cpp/compose.yml` bind-mounts a literal Windows path,
-`C:\Users\ahill\.lmstudio\models\lmstudio-community:/models`, loading
-`gpt-oss-20b-GGUF/gpt-oss-20b-MXFP4.gguf` — unresolvable on this macOS host.
+**llama.cpp is disabled.** Its `include:` line in `compose.yaml` is commented out, so
+`docker compose up -d` no longer tries to start it. Three separate reasons, all of
+which must be dealt with before re-enabling: the `volumes:` entry is a literal Windows
+path (`C:\Users\ahill\.lmstudio\models\lmstudio-community:/models`) that Docker rejects
+outright; this host has no working NVIDIA driver; and `--model` names
+`gpt-oss-20b-GGUF/gpt-oss-20b-MXFP4.gguf`, while `~/.lmstudio/models/lmstudio-community`
+holds only `gemma-4-E4B-it-GGUF`. The file also declares `ai-lab` without `name:
+AI-LAB`, which the other files' `name:` currently masks at merge time but which will
+bite as soon as it is included again. `traefik/proxies.yml` still routes
+`llm.ham51.com` to it and will 502 until then.
 
-**Broken config, don't copy as a pattern.** `llama.cpp/compose.yml` declares `ai-lab`
-without `name: AI-LAB` (the other three set it), so it joins a project-prefixed network
-Traefik is not on and `llm.ham51.com` cannot reach it. `open-webui/.env` writes its four
+**Broken config, don't copy as a pattern.** `open-webui/.env` writes its four
 web-search lines as YAML `KEY: "value"`, but `env_file:` parses only `KEY=value`, so web
 search never reaches the container (`.env.example` is correct). `recommendations.md`
 reviews these — note its `searxng-valkey` finding is fixed, not open.

@@ -7,7 +7,7 @@ single Traefik reverse proxy with automatic Let's Encrypt TLS.
 | --- | --- | --- |
 | **Traefik** | TLS termination + routing for everything below | — |
 | **Open WebUI** | Chat front-end for OpenAI-compatible models | `https://oracle.ham51.com` |
-| **llama.cpp** | GPU inference server (`gpt-oss-20b`, OpenAI-compatible API) | `https://llm.ham51.com` |
+| **llama.cpp** | GPU inference server (`gpt-oss-20b`, OpenAI-compatible API) — **currently disabled**, see below | `https://llm.ham51.com` |
 | **SearXNG** | Private metasearch engine, usable as Open WebUI's web-search backend | `https://search.ham51.com` |
 | **MCPJungle** | MCP gateway + registry — one endpoint fronting several MCP servers | `https://mcp.ham51.com` |
 | **LM Studio** | Runs on the *host*, not in Docker — proxied through Traefik | `https://lmstudio.ham51.com` |
@@ -40,7 +40,7 @@ SearXNG/
   .env                            #                                     (gitignored)
   core-config/settings.yml        # instance settings, secret_key       (gitignored)
 llama.cpp/
-  compose.yml                     # CUDA llama.cpp server
+  compose.yml                     # CUDA llama.cpp server  (include commented out)
 mcpjungle/
   compose.yml                     # gateway + Postgres + MCP servers + registration jobs
   compose-prod.yml                # standalone enterprise-mode variant (not included)
@@ -56,7 +56,8 @@ Anything marked *gitignored* has a committed `.example` sibling.
 ## Requirements
 
 - Docker Engine / Docker Desktop with Compose v2
-- An NVIDIA GPU + NVIDIA Container Toolkit (for `llama.cpp`)
+- An NVIDIA GPU + NVIDIA Container Toolkit — only for `llama.cpp`, which is
+  currently disabled, so not needed to run the rest
 - A domain in Cloudflare — TLS certs are issued via the ACME **DNS-01** challenge,
   so no port 80 exposure is needed, and wildcard/internal-only hosts work fine
 - Ports free on the host: `443`, `8080`, `9001`, `10001`, `10002`, `10003`
@@ -92,18 +93,25 @@ Create `A`/`AAAA` records for `oracle`, `llm`, `search`, `lmstudio`, and `mcp`
 in your zone. They must resolve for Traefik's routers to match, but DNS-01 means
 they don't need to be publicly reachable for the certificate itself to issue.
 
-**4. Adjust the model path**
+**4. (Optional) Re-enable llama.cpp**
 
-`llama.cpp/compose.yml` mounts a host directory of GGUF weights at `/models`.
-The committed value is a Windows path:
+Skip this unless you want local GPU inference — the stack runs fine without it,
+with Open WebUI pointed at LM Studio on the host instead.
+
+`llama.cpp`'s line in the root `compose.yaml` is commented out because the
+committed config cannot start: the volume is a literal Windows path, which Docker
+rejects with `invalid volume specification`.
 
 ```yaml
 volumes:
   - C:\Users\ahill\.lmstudio\models\lmstudio-community:/models
 ```
 
-Change it to wherever your models live, and make sure the `--model` argument
-below it matches a file inside that directory.
+To bring it back, uncomment the include, change that to wherever your models
+actually live, make sure the `--model` argument below it names a file inside that
+directory, and add `name: AI-LAB` to the file's `networks:` block — without it the
+container joins a project-prefixed network Traefik is not on. You also need a
+working NVIDIA driver and the Container Toolkit.
 
 **5. Bring it up**
 
@@ -125,7 +133,7 @@ docker compose restart open-webui
 # (Traefik's file provider hot-reloads, but a restart is the sure thing)
 docker compose restart traefik
 
-# Follow inference logs
+# Follow inference logs (only if llama.cpp has been re-enabled)
 docker compose logs -f llama-gpt-oss
 
 # Tear down (volumes — and therefore chat history — are preserved)
@@ -227,9 +235,11 @@ wired.
 - **`WEBUI_AUTH=False`** disables Open WebUI's login entirely while Traefik
   publishes it on a public hostname. Set it to `True` before exposing this
   anywhere untrusted.
-- **`llama.cpp/compose.yml` declares its network without `name: AI-LAB`**, unlike
-  the other three files. That yields a project-prefixed network instead of the
-  shared one; add the `name:` key to match.
+- **`llama.cpp` is commented out of the root `compose.yaml`** and none of its
+  problems are fixed — unrunnable volume path, missing driver, missing weights,
+  and a `networks:` block with no `name: AI-LAB`. Setup step 4 covers what to do
+  before re-enabling it. `traefik/proxies.yml` still routes `llm.ham51.com` at it,
+  so that hostname 502s in the meantime.
 - **SearXNG publishes `9001:8080` directly** in addition to being proxied, which
   bypasses TLS. Drop the `ports:` block if you only want access via Traefik.
 - **MCPJungle runs in `development` mode**, which means no authentication, and it
