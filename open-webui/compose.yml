@@ -1,4 +1,9 @@
-
+# Open WebUI — the chat front end for the lab.
+#
+# Included from the root `compose.yaml`; run everything from the project root.
+# Secrets and the model backend URL live in `open-webui/.env` (gitignored, see
+# .env.example). Non-secret configuration that should be version-controlled —
+# the MCP tool servers below — lives here instead.
 services:
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
@@ -6,6 +11,78 @@ services:
     #  - "3000:8080"
     env_file:
       - .env
+    environment:
+      # MCPJungle tool groups, pre-registered as MCP tool servers so a fresh
+      # volume comes up with them already wired instead of needing Admin
+      # Settings -> External Tools clicked through by hand.
+      #
+      # Open WebUI 0.11 parses TOOL_SERVER_CONNECTIONS as JSON (a list) and
+      # seeds the `tool_server.connections` config key from it. Requirements
+      # worth knowing before editing:
+      #   - "type": "mcp" selects the native streamable-HTTP MCP client. The
+      #     default, "openapi", would try to fetch an OpenAPI spec and fail.
+      #   - "config": {"enable": true} is what makes a server visible; an entry
+      #     without it is stored and ignored.
+      #   - "info": {"id"} is the stable handle (the tool id becomes
+      #     server:mcp:<id>) and "info": {"name"} is the label in the UI.
+      #   - "auth_type": "none" — MCPJungle runs in development mode with no
+      #     token. Switch to "bearer" plus "key" if that ever changes.
+      #   - Each URL is a *group* endpoint, so a chat sees that group's handful
+      #     of tools rather than all fourteen. http://mcpjungle:8080/mcp serves
+      #     the whole registry if an everything-server is ever wanted.
+      #
+      # THIS SEEDS, IT DOES NOT OVERRIDE. Open WebUI reads the env var only
+      # while the `tool_server.connections` row is absent from its database.
+      # The first save in Admin Settings -> External Tools writes that row, and
+      # from then on the UI is the source of truth and edits here do nothing.
+      # To go back to this file being authoritative, delete the row:
+      #   docker compose exec open-webui \
+      #     python -c "import sqlite3;sqlite3.connect('/app/backend/data/webui.db').execute(\"delete from config where key='tool_server.connections'\").connection.commit()"
+      # then restart the container. Setting ENABLE_PERSISTENT_CONFIG=False in
+      # .env makes the env var win permanently — but it does that for *every*
+      # setting, freezing all of Admin Settings, so it is not the default here.
+      TOOL_SERVER_CONNECTIONS: |
+        [
+          {
+            "type": "mcp",
+            "url": "http://mcpjungle:8080/v0/groups/ChatLLM/mcp",
+            "path": "",
+            "auth_type": "none",
+            "key": "",
+            "info": {
+              "id": "mcpjungle-chatllm",
+              "name": "MCPJungle: ChatLLM",
+              "description": "Web search (Brave) and URL fetch, for general chat."
+            },
+            "config": { "enable": true }
+          },
+          {
+            "type": "mcp",
+            "url": "http://mcpjungle:8080/v0/groups/Coding/mcp",
+            "path": "",
+            "auth_type": "none",
+            "key": "",
+            "info": {
+              "id": "mcpjungle-coding",
+              "name": "MCPJungle: Coding",
+              "description": "Web search, URL fetch and Context7 library documentation."
+            },
+            "config": { "enable": true }
+          },
+          {
+            "type": "mcp",
+            "url": "http://mcpjungle:8080/v0/groups/MicrosoftExpert/mcp",
+            "path": "",
+            "auth_type": "none",
+            "key": "",
+            "info": {
+              "id": "mcpjungle-microsoftexpert",
+              "name": "MCPJungle: MicrosoftExpert",
+              "description": "Web search, URL fetch and Microsoft Learn documentation search."
+            },
+            "config": { "enable": true }
+          }
+        ]
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

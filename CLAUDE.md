@@ -85,6 +85,17 @@ whatever is in Postgres. Adding a server means adding a `mcpjungle-register-<nam
 job *and* a `depends_on` entry in `mcpjungle-create-groups` — groups are validated
 against the live registry, so an unregistered tool fails the whole group job.
 
+**Open WebUI's copy of those groups seeds once.** `open-webui/compose.yml` sets
+`TOOL_SERVER_CONNECTIONS` (JSON, one entry per tool group, each needing `"type":
+"mcp"` and `"config": {"enable": true}` — the default type is `openapi`, and an entry
+without `enable` is stored and ignored). Unlike the mcpjungle jobs this does *not*
+converge on every `up`: Open WebUI falls back to the env var only while the
+`tool_server.connections` row is absent from `webui.db`, so the first save in Admin
+Settings → External Tools makes the UI authoritative and later edits to the compose
+file do nothing until that row is deleted. A group is reached at
+`http://mcpjungle:8080/v0/groups/<name>/mcp` over AI-LAB, and only when a chat uses
+it — nothing is fetched at startup, so the two services need no `depends_on`.
+
 ## Dependencies
 
 Only `traefik:v3.7.8`, `postgres:17`, and `prom/prometheus:v2.53.0` are pinned;
