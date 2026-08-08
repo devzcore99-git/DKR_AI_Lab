@@ -34,7 +34,7 @@ traefik/
   .env                            # CF_DNS_API_TOKEN                    (gitignored)
   letsencrypt/acme.json           # cert + account private keys         (gitignored)
 open-webui/
-  compose.yml
+  compose.yml                     # + TOOL_SERVER_CONNECTIONS: the MCPJungle tool groups
   .env                            # model backend, auth, search keys    (gitignored)
 SearXNG/
   compose.yml                     # searxng + valkey cache
@@ -219,6 +219,28 @@ Adding a server means adding a `mcpjungle-register-<name>` job to
 `mcpjungle/compose.yml` **and** listing it in `mcpjungle-create-groups`'
 `depends_on` — groups are validated against the live registry, so a group naming a
 tool that has not been registered yet fails the whole job.
+
+### Open WebUI sees the groups automatically
+
+The three groups are pre-wired as MCP tool servers by `TOOL_SERVER_CONNECTIONS` in
+`open-webui/compose.yml`, so a fresh `open-webui2` volume comes up with them already
+listed under *Admin Settings → External Tools* — no clicking through the form. Each
+entry points at a group endpoint on the `AI-LAB` network
+(`http://mcpjungle:8080/v0/groups/<name>/mcp`), needs `"type": "mcp"` for the native
+streamable-HTTP client, and needs `"config": {"enable": true}` to show up at all.
+Pick one per chat from the **+** menu; a model only sees the tools of the groups
+selected for that conversation.
+
+Two things to know before editing it:
+
+- **It seeds, it does not override.** Open WebUI reads the variable only while the
+  `tool_server.connections` row is missing from `webui.db`. The first save in *Admin
+  Settings → External Tools* writes that row, and after that the UI wins and changes
+  to the compose file do nothing. The comment above the variable has the SQL to drop
+  the row and hand authority back to the file.
+- **Nothing is fetched at boot.** Open WebUI connects to a group only when a chat
+  actually uses it, so the gateway being down delays nothing at startup — and no
+  `depends_on` is needed between the two services.
 
 ---
 
