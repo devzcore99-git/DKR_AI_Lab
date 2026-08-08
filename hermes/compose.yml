@@ -48,10 +48,10 @@ services:
     volumes:
       - ./hermes-data:/opt/data
 
-    # No published ports. Traefik reaches 9119 over AI-LAB and is the only way
-    # in. Publishing here would put a container with local shell execution
-    # (terminal.backend: local) on the LAN, bypassing TLS the way SearXNG's
-    # 9001 and MCPJungle's 8080 already do.
+    # No published ports — same as every other service here. Traefik reaches
+    # 9119 over AI-LAB and is the only way in. Publishing would put a container
+    # with local shell execution (terminal.backend: local) on the LAN,
+    # bypassing TLS.
     networks:
       - ai-lab
 

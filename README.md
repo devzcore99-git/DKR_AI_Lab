@@ -70,7 +70,7 @@ Anything marked *gitignored* has a committed `.example` sibling.
   `default` context
 - A domain in Cloudflare — TLS certs are issued via the ACME **DNS-01** challenge,
   so no port 80 exposure is needed, and wildcard/internal-only hosts work fine
-- Ports free on the host: `443`, `8080`, `9001`, `10001`, `10002`, `10003`
+- Port `443` free on the host — it is the only one the stack binds
 
 ---
 
@@ -298,8 +298,8 @@ Portal OAuth (`hermes dashboard register`) is the alternative.
 
 This makes Hermes the only authenticated service in the lab. It is also the one
 that most needs to be: the agent has local shell execution inside its container
-(`terminal.backend: local`). It publishes no host port for the same reason —
-Traefik is the only way in, unlike SearXNG's `9001` and MCPJungle's `8080`.
+(`terminal.backend: local`). Like every other service it publishes no host port,
+so Traefik is the only way in.
 
 ### Pointing it at the rest of the lab
 
@@ -370,12 +370,11 @@ wired.
   the *root* `.env` — a copy in `llama.cpp/.env` is read for interpolation but never
   activates a profile, leaving both services silently absent. `llm.ham51.com` 502s
   until one is active.
-- **SearXNG publishes `9001:8080` directly** in addition to being proxied, which
-  bypasses TLS. Drop the `ports:` block if you only want access via Traefik.
-- **MCPJungle runs in `development` mode**, which means no authentication, and it
-  publishes `8080` on the host on top of being proxied at `mcp.ham51.com`. Anyone
-  who can reach either can call every registered tool. Set `SERVER_MODE=enterprise`
-  in `mcpjungle/.env` before exposing it beyond a trusted network.
+- **MCPJungle runs in `development` mode**, which means no authentication. It is
+  no longer published on the host, but `https://mcp.ham51.com` still reaches it,
+  and anyone who gets there can call every registered tool. TLS is not a login.
+  Set `SERVER_MODE=enterprise` in `mcpjungle/.env` before exposing it beyond a
+  trusted network.
 - **The gateway mounts `mcpjungle/` at `/host:ro`** so filesystem MCP servers have
   something to read. Widen it to `${HOME}:/host/home:ro` only if you mean to.
 - **Hermes fails silently when its credentials are blank.** The container comes

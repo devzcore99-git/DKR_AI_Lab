@@ -39,10 +39,11 @@ services:
       SERVER_MODE: ${SERVER_MODE:-development}
       OTEL_ENABLED: ${OTEL_ENABLED:-false}
       MCP_SERVER_INIT_REQ_TIMEOUT_SEC: ${MCP_SERVER_INIT_REQ_TIMEOUT_SEC:-10}
-    # Traefik fronts this at https://mcp.ham51.com, but the port stays published:
-    # the `mcpjungle` CLI on the host talks to http://localhost:8080 directly.
-    ports:
-      - "${HOST_PORT:-8080}:8080"
+    # No published port: Traefik fronts this at https://mcp.ham51.com and is the
+    # only way in. The CLI does not need one either — it ships inside the image,
+    # so `docker compose exec mcpjungle /mcpjungle list servers` talks to the
+    # gateway over its own loopback. The registration jobs use the in-network
+    # http://mcpjungle:8080 and are likewise unaffected.
     volumes:
       # Mount this service directory to enable filesystem MCP server access.
       # Other options:
@@ -255,8 +256,8 @@ services:
       BRAVE_MCP_LOG_LEVEL: ${BRAVE_MCP_LOG_LEVEL:-info}
     # The MCP endpoint is unauthenticated, so it is deliberately NOT published to the
     # host by default — only the MCPJUNGLE network can reach it. Uncomment to probe it
-    # directly from the host, and pick a port other than 9001: SearXNG already
-    # publishes that one.
+    # directly from the host, knowing that publishes an unauthenticated MCP endpoint
+    # on the LAN with no TLS; `docker compose exec` is the safer way to poke at it.
     # ports:
     #   - "${BRAVE_HOST_PORT:-9011}:9001"
     healthcheck:

@@ -43,14 +43,17 @@ servers; only the `mcpjungle` gateway container joins both. Those servers'
 endpoints are unauthenticated, so do not move one onto AI-LAB to "make it reachable"
 — register it with the gateway instead.
 
-**Exposure.** Traefik binds host ports 443 and 10001-10003 and routes six hosts from
-`traefik/proxies.yml`: oracle (Open WebUI), llm (llama.cpp), search (SearXNG), mcp
-(MCPJungle), hermes (the Hermes dashboard), plus lmstudio — a host process via
-`host.docker.internal`. Three are unauthenticated: `open-webui/.env` sets
+**Exposure — 443 is the only host port.** No service publishes one; Traefik binds
+443 alone and routes six hosts from `traefik/proxies.yml`: oracle (Open WebUI), llm
+(llama.cpp), search (SearXNG), mcp (MCPJungle), hermes (the Hermes dashboard), plus
+lmstudio — a host process via `host.docker.internal`. Every router binds `port443`
+with `certResolver: letsencrypt`, so there is no plaintext path in. Adding a `ports:`
+block anywhere re-opens one; reach for `docker compose exec` instead.
+
+TLS is not authentication, and three of these have none: `open-webui/.env` sets
 `WEBUI_AUTH=False`, llama.cpp runs with no `--api-key`, and MCPJungle defaults to
-`SERVER_MODE=development`. Treat as trusted-LAN-only. SearXNG also publishes
-`9001:8080` and MCPJungle `8080:8080` on all interfaces, bypassing TLS. Hermes is the
-one exception: password-gated, and published on no host port at all.
+`SERVER_MODE=development`. Anyone who resolves the hostname reaches them. Still
+trusted-LAN-only. Hermes is the one exception — password-gated at the app.
 
 **Hermes is a dashboard bolted to a gateway, and they are different processes.** The
 container's main command is `gateway run` (messaging platforms + cron); the web
