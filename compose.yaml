@@ -7,3 +7,4 @@ include:
   # one, so including this file is safe on a host with no GPU.
   - ./llama.cpp/compose.yml
   - ./mcpjungle/compose.yml
+  - ./hermes/compose.yml

@@ -12,6 +12,10 @@ traefik/acme.json
 # SearXNG runtime settings — contains server.secret_key
 SearXNG/core-config/settings.yml
 
+# Hermes agent state — API keys, auth tokens, databases, logs, session history.
+# The container populates it on first run; it is the only copy.
+hermes/hermes-data/
+
 # ---- Local / OS noise ----
 .DS_Store
 Thumbs.db

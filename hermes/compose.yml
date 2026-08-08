@@ -1,0 +1,60 @@
+# Hermes AI Agent — the third-party nousresearch/hermes-agent image, fronted by
+# Traefik at hermes.ham51.com.
+#
+# Included from the root `compose.yaml`; run everything from the project root.
+# Dashboard credentials live in `hermes/.env` (gitignored, see .env.example).
+# Non-secret configuration that should be version-controlled lives here.
+#
+# All agent state is the `hermes-data/` bind mount beside this file. It is the
+# only copy — no named volume, no backup mechanism. `down -v` does not touch it
+# (it is a bind mount, not a volume), but `rm -rf hermes/hermes-data` is
+# unrecoverable.
+services:
+  hermes:
+    image: nousresearch/hermes-agent:latest
+    container_name: hermes-agent
+    restart: unless-stopped
+
+    # The messaging gateway (Slack/Telegram/cron) is the container's main
+    # program. It stays up even with nothing configured — it warns "No
+    # messaging platforms enabled" and keeps running — so this is safe on a
+    # fresh hermes-data/. The dashboard is NOT this command; see below.
+    command: ["gateway", "run"]
+
+    env_file:
+      - .env
+
+    environment:
+      # The web dashboard is a separate s6-supervised service inside the image,
+      # not the main command above. Without HERMES_DASHBOARD its run script
+      # exits immediately and the slot reports permanently down — no error, no
+      # dashboard.
+      HERMES_DASHBOARD: "1"
+      HERMES_DASHBOARD_PORT: "9119"
+
+      # HERMES_DASHBOARD_HOST defaults to 0.0.0.0, which is what lets Traefik
+      # reach it across AI-LAB. That is a non-loopback bind, so the auth gate
+      # engages and start_server FAILS CLOSED unless an auth provider is
+      # registered — HERMES_DASHBOARD_INSECURE has been a no-op since the June
+      # 2026 hardening. The credentials in .env are what satisfy it; without
+      # them the container runs but the dashboard never binds.
+      #
+      # Traefik terminates TLS and forwards X-Forwarded-Proto, which is what
+      # makes the session cookie Secure. PUBLIC_URL is the declared authority
+      # for URL reconstruction; it matters most if this is ever switched from
+      # the password provider to Nous Portal OAuth.
+      HERMES_DASHBOARD_PUBLIC_URL: "https://hermes.ham51.com"
+
+    volumes:
+      - ./hermes-data:/opt/data
+
+    # No published ports. Traefik reaches 9119 over AI-LAB and is the only way
+    # in. Publishing here would put a container with local shell execution
+    # (terminal.backend: local) on the LAN, bypassing TLS the way SearXNG's
+    # 9001 and MCPJungle's 8080 already do.
+    networks:
+      - ai-lab
+
+networks:
+  ai-lab:
+    name: AI-LAB
