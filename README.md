@@ -10,6 +10,7 @@ single Traefik reverse proxy with automatic Let's Encrypt TLS.
 | **llama.cpp** | GPU inference server, OpenAI-compatible — CUDA or Vulkan, picked per host | `https://llm.ham51.com` |
 | **SearXNG** | Private metasearch engine, usable as Open WebUI's web-search backend | `https://search.ham51.com` |
 | **MCPJungle** | MCP gateway + registry — one endpoint fronting several MCP servers | `https://mcp.ham51.com` |
+| **Hermes** | Nous Research agent — web dashboard plus a messaging/cron gateway | `https://hermes.ham51.com` |
 | **LM Studio** | Runs on the *host*, not in Docker — proxied through Traefik | `https://lmstudio.ham51.com` |
 
 All containers share an external-style Docker network named `AI-LAB`, so they
@@ -50,6 +51,10 @@ mcpjungle/
   .env                            # BRAVE_API_KEY                       (gitignored)
   mcp-servers/*.json              # stdio server definitions to register
   tool-groups/*.json              # curated tool subsets, one file per group
+hermes/
+  compose.yml                     # nousresearch/hermes-agent — gateway + web dashboard
+  .env                            # dashboard login, agent keys         (gitignored)
+  hermes-data/                    # ALL agent state, bind-mounted       (gitignored)
 ```
 
 Anything marked *gitignored* has a committed `.example` sibling.
@@ -65,7 +70,7 @@ Anything marked *gitignored* has a committed `.example` sibling.
   `default` context
 - A domain in Cloudflare — TLS certs are issued via the ACME **DNS-01** challenge,
   so no port 80 exposure is needed, and wildcard/internal-only hosts work fine
-- Ports free on the host: `443`, `8080`, `9001`, `10001`, `10002`, `10003`
+- Port `443` free on the host — it is the only one the stack binds
 
 ---
 
@@ -80,6 +85,7 @@ cp SearXNG/.env.example      SearXNG/.env
 cp SearXNG/core-config/settings.yml.example SearXNG/core-config/settings.yml
 cp mcpjungle/.env.example    mcpjungle/.env
 cp llama.cpp/.env.example    llama.cpp/.env
+cp hermes/.env.example       hermes/.env
 cp .env.example              .env
 ```
 
@@ -93,12 +99,30 @@ cp .env.example              .env
 | `open-webui/.env` | `BRAVE_SEARCH_API_KEY` | https://api-dashboard.search.brave.com/ (omit if using SearXNG) |
 | `SearXNG/core-config/settings.yml` | `server.secret_key` | `openssl rand -hex 16` |
 | `mcpjungle/.env` | `BRAVE_API_KEY` | https://api-dashboard.search.brave.com/ — separate from Open WebUI's copy; the gateway's Brave MCP server needs its own |
+| `hermes/.env` | `HERMES_DASHBOARD_BASIC_AUTH_USERNAME` | Any login name you want |
+| `hermes/.env` | `HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH` | The scrypt hash below — **not** the plaintext |
+| `hermes/.env` | `HERMES_DASHBOARD_BASIC_AUTH_SECRET` | `openssl rand -base64 48` |
+
+Hermes is the only service here that refuses to serve without credentials, so
+its three are not optional. Generate the password hash with the image's own
+helper — the password is not echoed and never enters shell history:
+
+```sh
+docker run --rm -it --entrypoint /opt/hermes/.venv/bin/python \
+  nousresearch/hermes-agent:latest -c \
+  'import getpass; from plugins.dashboard_auth.basic import hash_password; print(hash_password(getpass.getpass("password: ")))'
+```
+
+Leave them blank and nothing looks broken: the container starts, the gateway
+runs, and `hermes.ham51.com` simply never answers, because the dashboard's auth
+gate fails closed rather than serving unauthenticated.
 
 **3. Point DNS at the host**
 
-Create `A`/`AAAA` records for `oracle`, `llm`, `search`, `lmstudio`, and `mcp`
-in your zone. They must resolve for Traefik's routers to match, but DNS-01 means
-they don't need to be publicly reachable for the certificate itself to issue.
+Create `A`/`AAAA` records for `oracle`, `llm`, `search`, `lmstudio`, `mcp`, and
+`hermes` in your zone. They must resolve for Traefik's routers to match, but
+DNS-01 means they don't need to be publicly reachable for the certificate itself
+to issue.
 
 **4. Pick a llama.cpp GPU backend**
 
@@ -244,6 +268,65 @@ Two things to know before editing it:
 
 ---
 
+## Hermes
+
+`nousresearch/hermes-agent` is one image running **two independent things**, and
+most confusion about it comes from conflating them.
+
+- **The gateway** — `command: ["gateway", "run"]`, the container's main process.
+  Messaging platforms (Slack, Telegram, …) plus the cron scheduler. It stays up
+  with nothing configured, logging `No messaging platforms enabled`, so a fresh
+  install does not crashloop while you set the rest up.
+- **The dashboard** — a *separate s6-supervised service* inside the same
+  container, serving the web UI on 9119. This is what `hermes.ham51.com` fronts.
+
+The dashboard does not run unless `HERMES_DASHBOARD=1` (set in
+`hermes/compose.yml`). Without it the run script exits 0 and its finish script
+returns 125, which s6 reads as permanent failure — the slot reports down and
+nothing is logged as an error.
+
+### Why it demands a password
+
+The dashboard binds `0.0.0.0` inside the container, because that is what lets
+Traefik reach it across AI-LAB. Any non-loopback bind engages the auth gate, and
+`start_server` fails closed unless an auth provider is registered.
+`HERMES_DASHBOARD_INSECURE` was that escape hatch and has been a **no-op since
+the June 2026 hardening**; per the image's own comment, unauthenticated public
+dashboards were the entry point for an MCP-config persistence campaign. There is
+no bypass. The bundled username/password provider needs no external IDP; Nous
+Portal OAuth (`hermes dashboard register`) is the alternative.
+
+This makes Hermes the only authenticated service in the lab. It is also the one
+that most needs to be: the agent has local shell execution inside its container
+(`terminal.backend: local`). Like every other service it publishes no host port,
+so Traefik is the only way in.
+
+### Pointing it at the rest of the lab
+
+Hermes is on AI-LAB, so it addresses the others by name. Uncomment in
+`hermes/.env`:
+
+```sh
+OPENAI_BASE_URL=http://llama-gpt-oss:9010/v1   # local inference
+SEARXNG_URL=http://searxng:8080                # private search
+```
+
+`llama-gpt-oss` is a network alias carried by both llama.cpp profiles, so this
+works whichever backend is active — and resolves to nothing when
+`COMPOSE_PROFILES` names neither.
+
+### State
+
+Everything lives in `hermes/hermes-data/`, a **bind mount, not a named volume**:
+`.env`, `auth.json`, `config.yaml`, `SOUL.md`, `kanban.db`, `state.db`, logs and
+session history. Two consequences — `docker compose down -v` does *not* clear it,
+and there is no backup mechanism, so it is the only copy. The container writes
+that directory itself, including `config.yaml.bak*` snapshots; edit config there
+and `docker compose restart hermes`, but don't hand-edit generated files while it
+is running.
+
+---
+
 ## Adding a service to the proxy
 
 1. Add the container to its own `<service>/compose.yml` on the `ai-lab` network,
@@ -287,20 +370,29 @@ wired.
   the *root* `.env` — a copy in `llama.cpp/.env` is read for interpolation but never
   activates a profile, leaving both services silently absent. `llm.ham51.com` 502s
   until one is active.
-- **SearXNG publishes `9001:8080` directly** in addition to being proxied, which
-  bypasses TLS. Drop the `ports:` block if you only want access via Traefik.
-- **MCPJungle runs in `development` mode**, which means no authentication, and it
-  publishes `8080` on the host on top of being proxied at `mcp.ham51.com`. Anyone
-  who can reach either can call every registered tool. Set `SERVER_MODE=enterprise`
-  in `mcpjungle/.env` before exposing it beyond a trusted network.
+- **MCPJungle runs in `development` mode**, which means no authentication. It is
+  no longer published on the host, but `https://mcp.ham51.com` still reaches it,
+  and anyone who gets there can call every registered tool. TLS is not a login.
+  Set `SERVER_MODE=enterprise` in `mcpjungle/.env` before exposing it beyond a
+  trusted network.
 - **The gateway mounts `mcpjungle/` at `/host:ro`** so filesystem MCP servers have
   something to read. Widen it to `${HOME}:/host/home:ro` only if you mean to.
+- **Hermes fails silently when its credentials are blank.** The container comes
+  up, `docker compose ps` looks healthy, and `hermes.ham51.com` 502s because the
+  dashboard's auth gate refused to bind. `docker compose logs hermes` is where it
+  says so — look for `HERMES_DASHBOARD_READY`, which is absent when the gate
+  fails closed.
+- **`hermes-data/` is a bind mount and survives `down -v`.** Every other
+  service's state is a named volume that `down -v` destroys; Hermes is the
+  reverse, and deleting the directory by hand is unrecoverable.
 
 ---
 
 ## Secrets
 
-Never commit `.env` files, `traefik/letsencrypt/acme.json`, or
-`SearXNG/core-config/settings.yml` — `.gitignore` covers all three. When
+Never commit `.env` files, `traefik/letsencrypt/acme.json`,
+`SearXNG/core-config/settings.yml`, or `hermes/hermes-data/` — `.gitignore`
+covers all four. That last one is a whole directory rather than a single file:
+the agent writes its own API keys, OAuth tokens and session history into it. When
 changing configuration, update the matching `.example` file in the same commit
 so the documentation stays honest.

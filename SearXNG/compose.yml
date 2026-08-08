@@ -14,8 +14,8 @@ services:
       # not a secret. Note `environment:` wins over `env_file:`, so overriding this
       # means editing here, not .env.
       SEARXNG_VALKEY_URL: valkey://searxng-valkey:6379/0
-    ports:
-      - 9001:8080
+    # No published port: Traefik fronts this at https://search.ham51.com and is
+    # the only way in. Open WebUI reaches it in-network at http://searxng:8080.
     volumes:
       - ./core-config/:/etc/searxng/:Z
       - searxng-core-data:/var/cache/searxng/

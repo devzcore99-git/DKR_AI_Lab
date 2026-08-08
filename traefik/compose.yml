@@ -10,11 +10,12 @@ services:
       # Enable file provider
       - "--providers.file.filename=/etc/traefik/proxies.yml"
 
-      # Entry points
+      # Entry points. TLS on 443 is the only one — every router in proxies.yml
+      # binds `port443` with `certResolver: letsencrypt`, so a plaintext
+      # entrypoint would be a way around TLS rather than a route to anything.
+      # The former lmstudio/mcpgateway/searxng entrypoints on 10001-10003 were
+      # referenced by no router at all and served nothing but 404s.
       - "--entrypoints.port443.address=:443"
-      - "--entrypoints.lmstudio.address=:10001"
-      - "--entrypoints.mcpgateway.address=:10002"
-      - "--entrypoints.searxng.address=:10003"
 
       # ACME
       - "--certificatesresolvers.letsencrypt.acme.email=admin@ham51.com"
@@ -35,9 +36,6 @@ services:
 
     ports:
       - "443:443"
-      - "10001:10001"
-      - "10002:10002"
-      - "10003:10003"
 
     volumes:
       - "./proxies.yml:/etc/traefik/proxies.yml:ro"
