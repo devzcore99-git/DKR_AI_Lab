@@ -81,6 +81,19 @@ services:
               "description": "Web search, URL fetch and Microsoft Learn documentation search."
             },
             "config": { "enable": true }
+          },
+          {
+            "type": "mcp",
+            "url": "http://mcpjungle:8080/v0/groups/WebAutomation/mcp",
+            "path": "",
+            "auth_type": "none",
+            "key": "",
+            "info": {
+              "id": "mcpjungle-webautomation",
+              "name": "MCPJungle: WebAutomation",
+              "description": "Web search, URL fetch and a real headless Chromium (Playwright) for browsing and interacting with pages."
+            },
+            "config": { "enable": true }
           }
         ]
     extra_hosts:

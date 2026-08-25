@@ -210,6 +210,7 @@ client points at the gateway instead of wiring up each server itself.
 | `context7` | container on `MCPJUNGLE` | library docs; anonymous, rate-limited |
 | `fetch` | stdio subprocess inside the gateway | URL → markdown |
 | `MicrosoftLearnMCP` | remote, `learn.microsoft.com` | nothing runs locally |
+| `playwright` | container on `MCPJUNGLE` | Microsoft's image; headless Chromium only |
 
 Registration is not stored in the compose file's head — it is applied by one-shot
 `mcpjungle-register-*` jobs that run on every `up` and exit. They use `--force`, so
@@ -217,8 +218,8 @@ they converge rather than fail on "already exists", and the registry survives a
 wiped `mcpjungle-db-data` volume because bringing the stack back up re-applies them.
 
 A **tool group** is a curated subset of the gateway's tools with its own endpoint,
-`/v0/groups/<name>/mcp` — point a client at one and it sees five tools instead of
-all fourteen. Groups live in `mcpjungle/tool-groups/*.json`, one file per group,
+`/v0/groups/<name>/mcp` — point a client at one and it sees a handful of tools
+instead of the whole registry. Groups live in `mcpjungle/tool-groups/*.json`, one file per group,
 and `mcpjungle-create-groups` applies them after every registration job finishes.
 Those files are the source of truth: the job fully overwrites the stored config.
 
@@ -243,6 +244,16 @@ Adding a server means adding a `mcpjungle-register-<name>` job to
 `mcpjungle/compose.yml` **and** listing it in `mcpjungle-create-groups`'
 `depends_on` — groups are validated against the live registry, so a group naming a
 tool that has not been registered yet fails the whole job.
+
+**Playwright needs `--allowed-hosts`.** It drives a real headless Chromium, so
+unlike the other servers it checks the `Host` header for DNS-rebinding protection —
+and that check defaults to *the host it is bound to*, which means `localhost:9003`
+even though `--host` is `0.0.0.0`. Without the flag the container starts, the
+healthcheck passes, and every request from the gateway comes back
+`403 Access is only allowed at localhost:9003`. The list in `mcpjungle/compose.yml`
+must match the URL the registration job uses (`http://playwright:9003/mcp`); change
+one and you must change the other. Chromium also gets `shm_size: 1gb` — Docker's
+default 64MB is not enough for it to render real pages.
 
 ### Open WebUI sees the groups automatically
 
