@@ -136,11 +136,13 @@ it — nothing is fetched at startup, so the two services need no `depends_on`.
 
 ## Dependencies
 
-Only `traefik:v3.7.8`, `postgres:17`, and `prom/prometheus:v2.53.0` are pinned;
-`searxng:latest`, `open-webui:main`, `llama.cpp:server-cuda`, `llama.cpp:server-vulkan`,
-`mcpjungle:latest-stdio`, `mcp/brave-search:latest`, `mcp/context7:latest`,
-`playwright/mcp:latest`, and `nousresearch/hermes-agent:latest` re-resolve on every pull, so rebuilds are not
-reproducible. Hermes is the sharpest case: a pull can swap the application *and its
+Only `traefik:v3.7.8`, `postgres:17`, `prom/prometheus:v2.53.0`, and
+`playwright/mcp:v0.0.79` are pinned; `searxng:latest`, `open-webui:main`,
+`llama.cpp:server-cuda`, `llama.cpp:server-vulkan`, `mcpjungle:latest-stdio`,
+`mcp/brave-search:latest`, `mcp/context7:latest`, and
+`nousresearch/hermes-agent:latest` re-resolve on every pull, so rebuilds are not
+reproducible. Playwright is pinned because a bump moves both the MCP tool surface
+and the bundled Chromium; override with `PLAYWRIGHT_MCP_IMAGE_TAG`. Hermes is the sharpest case: a pull can swap the application *and its
 on-disk schemas* under `hermes-data/`, with no rollback. The llama.cpp images also
 publish `server-rocm` and plain `server` (CPU) if a third profile is ever wanted.
 MCPJungle needs the `-stdio` image tag specifically — it ships the `uvx` and

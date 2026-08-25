@@ -346,7 +346,10 @@ services:
   # container does not have, and without the flag the browser fails to launch on the
   # first tool call. The container itself is the isolation boundary here.
   playwright:
-    image: mcr.microsoft.com/playwright/mcp:${PLAYWRIGHT_MCP_IMAGE_TAG:-latest}
+    # Pinned, unlike its sibling MCP servers. A bump here can swap both the MCP
+    # surface and the bundled Chromium, so it is a deliberate step, not a side
+    # effect of `docker compose pull`. Tags: https://mcr.microsoft.com/v2/playwright/mcp/tags/list
+    image: mcr.microsoft.com/playwright/mcp:${PLAYWRIGHT_MCP_IMAGE_TAG:-v0.0.79}
     container_name: mcpjungle-playwright
     entrypoint: ["node", "/app/cli.js"]
     command:
