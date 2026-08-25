@@ -178,6 +178,30 @@ services:
     networks:
       - mcpjungle
 
+  # One-shot job: registers playwright with mcpjungle, then exits.
+  # Same --force idempotency as the brave-search registration above.
+  mcpjungle-register-playwright:
+    image: ghcr.io/mcpjungle/mcpjungle:${MCPJUNGLE_IMAGE_TAG:-latest-stdio}
+    container_name: mcpjungle-register-playwright
+    entrypoint: ["/mcpjungle"]
+    command:
+      - register
+      - --registry=http://mcpjungle:8080
+      - --name=playwright
+      # The Host in this URL is exactly what --allowed-hosts must list on the
+      # playwright service above; changing one without the other yields a 403.
+      - --url=http://playwright:9003/mcp
+      - --description=Playwright - drives a real headless Chromium to browse, inspect and interact with web pages
+      - --force
+    depends_on:
+      mcpjungle:
+        condition: service_healthy
+      playwright:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - mcpjungle
+
   # One-shot job: creates the tool groups in ./tool-groups, then exits.
   #
   # A group is a curated subset of the gateway's tools, served at its own endpoint
@@ -230,6 +254,8 @@ services:
       mcpjungle-register-context7:
         condition: service_completed_successfully
       mcpjungle-register-microsoft-learn:
+        condition: service_completed_successfully
+      mcpjungle-register-playwright:
         condition: service_completed_successfully
     restart: "no"
     networks:
@@ -303,6 +329,79 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    restart: unless-stopped
+    networks:
+      - mcpjungle
+
+  # Playwright MCP server (https://github.com/microsoft/playwright-mcp), Microsoft's
+  # official image, driving a real headless Chromium so models can browse and act on
+  # pages rather than only read fetched HTML.
+  #
+  # The image's own entrypoint speaks stdio, so it is overridden to run the CLI
+  # directly in HTTP mode — this is the invocation from upstream's README, and the
+  # only supported one in Docker: the image ships headless Chromium alone, so
+  # --browser firefox/webkit/msedge will not start.
+  #
+  # --no-sandbox is required. Chromium's setuid sandbox needs privileges this
+  # container does not have, and without the flag the browser fails to launch on the
+  # first tool call. The container itself is the isolation boundary here.
+  playwright:
+    # Pinned, unlike its sibling MCP servers. A bump here can swap both the MCP
+    # surface and the bundled Chromium, so it is a deliberate step, not a side
+    # effect of `docker compose pull`. Tags: https://mcr.microsoft.com/v2/playwright/mcp/tags/list
+    image: mcr.microsoft.com/playwright/mcp:${PLAYWRIGHT_MCP_IMAGE_TAG:-v0.0.79}
+    container_name: mcpjungle-playwright
+    entrypoint: ["node", "/app/cli.js"]
+    command:
+      - --headless
+      - --browser=chromium
+      - --no-sandbox
+      # In-memory browser profile. Nothing is persisted between restarts, and there is
+      # no on-disk profile for concurrent sessions to contend over.
+      - --isolated
+      - --port=9003
+      # MUST be 0.0.0.0, same reasoning as brave-search: it binds only inside this
+      # container's network namespace and no host port is published.
+      - --host=0.0.0.0
+      # REQUIRED, and the one thing that is easy to get wrong. Playwright MCP checks
+      # the Host header for DNS-rebinding protection, and --allowed-hosts "defaults to
+      # the host the server is bound to" — meaning localhost:9003, NOT every interface,
+      # even though --host is 0.0.0.0. Leave this off and the listener comes up, the
+      # healthcheck below passes, and every request from mcpjungle is answered with
+      # `403 Access is only allowed at localhost:9003`.
+      # Both entries are needed: `playwright:9003` is the Host mcpjungle sends over
+      # MCPJUNGLE, `127.0.0.1:9003` is the one the healthcheck sends. Do not widen this
+      # to '*' — that disables the check outright.
+      - --allowed-hosts=playwright:9003,127.0.0.1:9003
+    # Chromium needs more than Docker's default 64MB of shared memory; it crashes
+    # part-way through rendering non-trivial pages without this.
+    shm_size: 1gb
+    # Chromium forks freely and orphans processes on session teardown. Without an init
+    # to reap them, zombies accumulate in the container for as long as it runs.
+    init: true
+    # Unauthenticated endpoint, same reasoning as brave-search and context7: reachable
+    # only from the private MCPJUNGLE network. Uncomment to probe it directly from the
+    # host — note the --allowed-hosts line above would also need the host:port added,
+    # or the request is rejected before it reaches the MCP handler.
+    # ports:
+    #   - "${PLAYWRIGHT_HOST_PORT:-9003}:9003"
+    healthcheck:
+      # Debian bookworm slim base — neither curl nor wget is installed, so unlike the
+      # other two servers this probe goes through node, which is guaranteed present.
+      # A bare GET on /mcp returns 400 (the streamable-HTTP endpoint wants a session
+      # and an Accept of text/event-stream), which still proves the listener is up and
+      # the host check passed, so treat any HTTP response as healthy.
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get({host:'127.0.0.1',port:9003,path:'/mcp'},()=>process.exit(0)).on('error',()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # Longer than its siblings: the Node process is up quickly, but the image is
+      # large and cold-start disk paging makes the first probe unreliable.
+      start_period: 20s
     restart: unless-stopped
     networks:
       - mcpjungle

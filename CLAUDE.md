@@ -103,6 +103,20 @@ web-search lines as YAML `KEY: "value"`, but `env_file:` parses only `KEY=value`
 search never reaches the container (`.env.example` is correct). `recommendations.md`
 reviews these — note its `searxng-valkey` finding is fixed, not open.
 
+**Playwright's host check is the one that bites.** `mcpjungle/compose.yml` runs
+Microsoft's `playwright/mcp` image with its stdio entrypoint overridden to
+`node /app/cli.js ... --port=9003 --host=0.0.0.0`. `--host 0.0.0.0` binds every
+interface but does *not* widen the DNS-rebinding check: `--allowed-hosts` "defaults
+to the host the server is bound to", i.e. `localhost:9003`. Omit it and the
+container starts, the healthcheck passes, and the gateway gets `403 Access is only
+allowed at localhost:9003` on every call. The flag must list the Host mcpjungle
+sends (`playwright:9003`, from the register job's `--url`) plus `127.0.0.1:9003`
+for the healthcheck — edit the URL and the flag together. The image is Debian slim
+with neither curl nor wget, so that healthcheck goes through `node` instead. Docker
+gets headless Chromium only (`--browser firefox` will not start), it needs
+`--no-sandbox` and `shm_size: 1gb`, and `browser_run_code_unsafe` is
+RCE-equivalent — it is deliberately kept out of the `WebAutomation` tool group.
+
 **MCP registrations are code, not database rows.** `mcpjungle/mcp-servers/*.json` and
 `mcpjungle/tool-groups/*.json` are the source of truth; the one-shot jobs overwrite
 whatever is in Postgres. Adding a server means adding a `mcpjungle-register-<name>`
@@ -122,11 +136,13 @@ it — nothing is fetched at startup, so the two services need no `depends_on`.
 
 ## Dependencies
 
-Only `traefik:v3.7.8`, `postgres:17`, and `prom/prometheus:v2.53.0` are pinned;
-`searxng:latest`, `open-webui:main`, `llama.cpp:server-cuda`, `llama.cpp:server-vulkan`,
-`mcpjungle:latest-stdio`, `mcp/brave-search:latest`, `mcp/context7:latest`, and
+Only `traefik:v3.7.8`, `postgres:17`, `prom/prometheus:v2.53.0`, and
+`playwright/mcp:v0.0.79` are pinned; `searxng:latest`, `open-webui:main`,
+`llama.cpp:server-cuda`, `llama.cpp:server-vulkan`, `mcpjungle:latest-stdio`,
+`mcp/brave-search:latest`, `mcp/context7:latest`, and
 `nousresearch/hermes-agent:latest` re-resolve on every pull, so rebuilds are not
-reproducible. Hermes is the sharpest case: a pull can swap the application *and its
+reproducible. Playwright is pinned because a bump moves both the MCP tool surface
+and the bundled Chromium; override with `PLAYWRIGHT_MCP_IMAGE_TAG`. Hermes is the sharpest case: a pull can swap the application *and its
 on-disk schemas* under `hermes-data/`, with no rollback. The llama.cpp images also
 publish `server-rocm` and plain `server` (CPU) if a third profile is ever wanted.
 MCPJungle needs the `-stdio` image tag specifically — it ships the `uvx` and
