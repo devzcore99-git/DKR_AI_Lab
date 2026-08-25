@@ -142,8 +142,9 @@ Only `traefik:v3.7.8`, `postgres:17`, `prom/prometheus:v2.53.0`, and
 `mcp/brave-search:latest`, `mcp/context7:latest`, and
 `nousresearch/hermes-agent:latest` re-resolve on every pull, so rebuilds are not
 reproducible. Playwright is pinned because a bump moves both the MCP tool surface
-and the bundled Chromium; override with `PLAYWRIGHT_MCP_IMAGE_TAG`. Hermes is the sharpest case: a pull can swap the application *and its
-on-disk schemas* under `hermes-data/`, with no rollback. The llama.cpp images also
+and the bundled Chromium; override with `PLAYWRIGHT_MCP_IMAGE_TAG`. Hermes is the
+sharpest case: a pull can swap the application *and its on-disk schemas* under
+`hermes-data/`, with no rollback. The llama.cpp images also
 publish `server-rocm` and plain `server` (CPU) if a third profile is ever wanted.
 MCPJungle needs the `-stdio` image tag specifically — it ships the `uvx` and
 `python3` that stdio servers such as `fetch` are spawned with; plain `latest` cannot
