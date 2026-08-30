@@ -1,0 +1,5 @@
+creation_rules:
+  - path_regex: \.(ya?ml|json|env)$
+    age: age1zr2juv0kwyaptwr4cc20nq9s70csauyr975lthmvvpu7q68f8ynqe3n32s
+    encrypted_regex: '^(.*KEY)$'
+
