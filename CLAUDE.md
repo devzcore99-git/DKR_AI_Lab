@@ -72,12 +72,28 @@ the container runs normally while hermes.ham51.com never answers. Store
 `_PASSWORD_HASH` (scrypt), not `_PASSWORD`, and set `_SECRET` or every restart
 invalidates all sessions.
 
-**Secrets.** All `.env` files, `traefik/letsencrypt/acme.json`, and
-`SearXNG/core-config/settings.yml` are gitignored with committed `.example` siblings —
-update both in the same commit. Name variables, never values: `CF_DNS_API_TOKEN`,
+**Secrets — the `.env` files are generated, not authored.** Each service commits an
+age-encrypted `<service>/enc.env`; `./runit.sh` decrypts all six into the `.env`
+beside each one and then runs `docker compose` (passing its arguments through, so
+`./runit.sh down` and `./runit.sh logs -f hermes` work). Compose cannot read an
+enc.env — `env_file:` and `${VAR}` interpolation both want a plain file — so *nothing
+starts without running it first*. Editing a `.env` by hand is a change that the next
+`./runit.sh` silently overwrites: edit `sops <service>/enc.env` instead, which
+round-trips through `$EDITOR` without putting plaintext on disk.
+
+`.sops.yaml` encrypts by variable *name* (`KEY|TOKEN|SECRET|PASSWORD|HASH|USERNAME|
+CREDENTIAL`), leaving everything else legible. So a new secret whose name misses that
+regex is committed in the clear, and **comments are never encrypted** — a value in a
+`#` line goes to the repo plaintext. The root `.env` is out of the scheme on purpose:
+it holds only `COMPOSE_PROFILES`, host-specific and written by `detect-gpu.sh`.
+
+The `.example` siblings are still the documentation, and still gitignore-paired with
+`traefik/letsencrypt/acme.json` and `SearXNG/core-config/settings.yml` — update both
+in the same commit. Name variables, never values: `CF_DNS_API_TOKEN`,
 `OPENAI_API_KEY`, `WEBUI_SECRET_KEY`, `BRAVE_SEARCH_API_KEY`, `BRAVE_API_KEY`,
 `server.secret_key`. Brave is keyed twice, from separate files: `open-webui/.env` for
-Open WebUI's own web search, `mcpjungle/.env` for the Brave MCP server.
+Open WebUI's own web search, `mcpjungle/.env` for the Brave MCP server. The age
+identity (`~/.config/sops/age/keys.txt`) is the only key, with no backup in the repo.
 
 **llama.cpp is profile-gated.** `llama.cpp/compose.yml` defines the same server twice
 — `llama-cuda` (profile `cuda`, `server-cuda`, needs the NVIDIA Container Toolkit) and
@@ -98,10 +114,11 @@ both a Desktop daemon and a native one; `docker context ls` shows which is activ
 GPU work needs `default`. Verified on `default`: Vulkan0 = AMD Radeon 880M, and
 `LLAMA_NGL=999` measured 2.9x the prompt throughput of `LLAMA_NGL=0`.
 
-**Broken config, don't copy as a pattern.** `open-webui/.env` writes its four
-web-search lines as YAML `KEY: "value"`, but `env_file:` parses only `KEY=value`, so web
-search never reaches the container (`.env.example` is correct). `recommendations.md`
-reviews these — note its `searxng-valkey` finding is fixed, not open.
+**`recommendations.md` is a review, not a to-do list** — its `searxng-valkey` finding
+is fixed, not open, and so is the `open-webui/.env` one (the four web-search lines
+used YAML `KEY: "value"`, which `env_file:` does not parse; they are `KEY=value` now
+and resolve in `docker compose config`). Check a finding against the tree before
+acting on it.
 
 **Playwright's host check is the one that bites.** `mcpjungle/compose.yml` runs
 Microsoft's `playwright/mcp` image with its stdio entrypoint overridden to

@@ -1,5 +1,8 @@
 # ---- Secrets ----
-# Real env files (commit the .example versions instead)
+# Real env files (commit the .example versions instead).
+# NOTE: `<service>/enc.env` is SOPS/age-encrypted and IS tracked on purpose — it is
+# the only copy of the configuration in the repo, and ./runit.sh decrypts it into the
+# .env files ignored here. It does not match these patterns; do not add one for it.
 .env
 .env.*
 !.env.example
