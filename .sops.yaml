@@ -1,5 +1,16 @@
+# SOPS encryption rules for this project's env files.
+#
+# Every service keeps its secrets in `<service>/enc.env`, committed, alongside a
+# gitignored `<service>/.env` that runit.sh regenerates from it. Only the values
+# whose *name* matches encrypted_regex are ciphertext — hostnames, ports, model
+# paths and comments stay readable, so an enc.env is still legible as config.
+#
+# Edit a secret with `sops <service>/enc.env` (decrypts to $EDITOR, re-encrypts
+# on save, never writes plaintext to disk), then re-run ./runit.sh.
+#
+# path_regex deliberately matches only .env / enc.env: traefik/proxies.yml and
+# mcpjungle/*.json are non-secret and must stay plaintext.
 creation_rules:
-  - path_regex: \.(ya?ml|json|env)$
+  - path_regex: (^|/)(\.env|enc\.env)$
     age: age1zr2juv0kwyaptwr4cc20nq9s70csauyr975lthmvvpu7q68f8ynqe3n32s
-    encrypted_regex: '^(.*KEY)$'
-
+    encrypted_regex: '^.*(KEY|TOKEN|SECRET|PASSWORD|HASH|USERNAME|CREDENTIALS?)$'
