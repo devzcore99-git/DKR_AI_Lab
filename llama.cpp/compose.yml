@@ -17,6 +17,18 @@
 # `deploy.resources.reservations.devices` block, Vulkan needs /dev/dri passed
 # through. Compose can substitute values but cannot conditionally include a block,
 # so one service definition cannot cover both.
+#
+# Each service takes a rolling tag by default. Pin the matching variable in
+# llama.cpp/.env to a build tag (`server-cuda-b10752`, `server-vulkan-b10752`)
+# once the box is in service: llama.cpp moves fast enough that "the same compose
+# file" is otherwise not the same server, and a regression shows up as a box that
+# stops answering after a routine `docker compose pull`. The two backends pin
+# independently because they are separate images built from the same commit.
+#
+# Images exist for only a subset of build tags — b10753 through b10760 are git
+# tags with no image — so check what is published before picking a number rather
+# than reading one off the releases page:
+#   docker buildx imagetools inspect ghcr.io/ggml-org/llama.cpp:server-vulkan-bNNNNN
 
 x-llama-common: &llama-common
   restart: unless-stopped
@@ -82,7 +94,7 @@ services:
   llama-cuda:
     <<: *llama-common
     profiles: [cuda]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    image: "ghcr.io/ggml-org/llama.cpp:${LLAMA_CUDA_IMAGE_TAG:-server-cuda}"
     environment:
       NVIDIA_VISIBLE_DEVICES: all
     # Requires the NVIDIA Container Toolkit. Without it the daemon refuses the
@@ -100,7 +112,7 @@ services:
   llama-vulkan:
     <<: *llama-common
     profiles: [vulkan]
-    image: ghcr.io/ggml-org/llama.cpp:server-vulkan
+    image: "ghcr.io/ggml-org/llama.cpp:${LLAMA_VULKAN_IMAGE_TAG:-server-vulkan}"
     # Mesa's Vulkan drivers ship inside the image; all the host hands over is the
     # render node. No NVIDIA runtime, no Container Toolkit.
     devices:
