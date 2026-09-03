@@ -1,24 +1,29 @@
 #!/usr/bin/env bash
-# Populate the environment from SOPS, then run Docker Compose.
+# Decrypt every service's SOPS secrets into this process's environment, then run
+# Docker Compose in it.
 #
-# Each service keeps its secrets in a committed `<service>/enc.env` (age-encrypted
-# by SOPS) rather than a gitignored `<service>/.env`. Compose cannot read those:
-# `env_file:` wants a plain file, and so does the per-directory .env that
-# `include:` uses for ${VAR} interpolation. So this script decrypts each enc.env
-# into the .env beside it, then hands off to `docker compose`.
+# Nothing is written to disk. The `<service>/enc.env` files are age-encrypted and
+# committed; their plaintext exists only in the environment of this script and the
+# `docker compose` it execs. There are no `<service>/.env` files any more — the
+# compose files read every value through `${VAR}` interpolation instead of
+# `env_file:`.
 #
 #   ./runit.sh                 decrypt, then `docker compose up -d`
 #   ./runit.sh down            decrypt, then `docker compose down`
 #   ./runit.sh logs -f hermes  decrypt, then `docker compose logs -f hermes`
-#   ./runit.sh --decrypt-only  decrypt and stop there
-#   ./runit.sh --clean         ...and remove the plaintext .env files afterwards
+#   ./runit.sh --names         list the variable names that would be exported
 #
-# Any arguments that are not flags of this script are passed through to
-# `docker compose` verbatim; with none, it runs `up -d`.
+# Any argument that is not a flag of this script is passed to `docker compose`
+# verbatim; with none, it runs `up -d`.
+#
+# THIS SCRIPT IS NOW THE ONLY WAY IN. A bare `docker compose ps` (or down, or
+# logs) fails at parse time, because the required variables are no longer on disk
+# for Compose to find. That is the trade for keeping plaintext off the disk; use
+# `./runit.sh ps` instead.
 #
 # Editing a secret does NOT go through this script — use `sops <service>/enc.env`,
 # which decrypts into $EDITOR and re-encrypts on save without ever writing
-# plaintext to disk. Then re-run ./runit.sh to push the change into .env.
+# plaintext to disk.
 set -euo pipefail
 
 # CLAUDE.md: every compose command runs from the project root. Running
@@ -28,26 +33,23 @@ cd "$(dirname "$0")"
 
 # The six services whose enc.env this script manages. The root .env is
 # deliberately absent: it holds only COMPOSE_PROFILES, which is host-specific and
-# not a secret — llama.cpp/detect-gpu.sh writes it.
+# not a secret — llama.cpp/detect-gpu.sh writes it, and Compose reads it directly.
 SERVICES=(traefik open-webui SearXNG llama.cpp mcpjungle hermes)
 
-CLEAN=0
-DECRYPT_ONLY=0
+NAMES_ONLY=0
 COMPOSE_ARGS=()
 for arg in "$@"; do
     case "$arg" in
-        --clean)        CLEAN=1 ;;
-        --decrypt-only) DECRYPT_ONLY=1 ;;
-        -h|--help)      awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;;
-        *)              COMPOSE_ARGS+=("$arg") ;;
+        --names)   NAMES_ONLY=1 ;;
+        -h|--help) awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;;
+        *)         COMPOSE_ARGS+=("$arg") ;;
     esac
 done
-# No compose verb given: bring the lab up.
 [ ${#COMPOSE_ARGS[@]} -eq 0 ] && COMPOSE_ARGS=(up -d)
 
 command -v sops >/dev/null 2>&1 || {
-    echo "runit.sh: sops not found. Install it (brew install sops) — the .env" >&2
-    echo "          files are encrypted and nothing can start without it." >&2
+    echo "runit.sh: sops not found. Install it (brew install sops) — the config is" >&2
+    echo "          encrypted and nothing can start without it." >&2
     exit 1
 }
 
@@ -61,49 +63,94 @@ if [ -z "${SOPS_AGE_KEY:-}" ] && [ ! -f "$KEY_FILE" ]; then
     exit 1
 fi
 
-echo "Decrypting env files..."
+# Every name exported so far, and which service claimed it. The environment is one
+# flat namespace, unlike the per-directory .env files this replaced, so two
+# services defining the same name would leave one value silently overwritten.
+# Refuse instead: prefix the name per service (OPENWEBUI_/HERMES_) and map it back
+# in that service's compose.yml `environment:` block.
+declare -A CLAIMED_BY=()
+EXPORTED=()
+
+# Progress goes to stderr: stdout belongs to the pass-through command, so
+# `./runit.sh config --format json` stays machine-readable.
+echo "Loading secrets into the environment..." >&2
 for svc in "${SERVICES[@]}"; do
     enc="$svc/enc.env"
-    out="$svc/.env"
     [ -f "$enc" ] || { echo "runit.sh: missing $enc" >&2; exit 1; }
 
-    # Decrypt to a temp first. Redirecting sops straight into $out truncates a
-    # working .env the moment sops errors — which is exactly how the .env files
-    # were lost once already.
-    tmp="$(mktemp "${TMPDIR:-/tmp}/runit.XXXXXX")"
-    if ! sops -d --input-type dotenv --output-type dotenv "$enc" > "$tmp" 2>"$tmp.err"; then
+    if ! plaintext="$(sops -d --input-type dotenv --output-type dotenv "$enc" 2>&1)"; then
         echo "runit.sh: failed to decrypt $enc" >&2
-        sed 's/^/          /' "$tmp.err" >&2
-        rm -f "$tmp" "$tmp.err"
+        printf '%s\n' "$plaintext" | sed 's/^/          /' >&2
         exit 1
     fi
-    [ -s "$tmp" ] || { echo "runit.sh: $enc decrypted to nothing" >&2; rm -f "$tmp" "$tmp.err"; exit 1; }
 
-    install -m 600 "$tmp" "$out"
-    rm -f "$tmp" "$tmp.err"
-    printf '  %-11s -> %s\n' "$enc" "$out"
+    count=0
+    while IFS= read -r line; do
+        # Blank lines and comments. A value is never taken from a comment — SOPS
+        # does not encrypt comment text, so anything in one is public anyway.
+        [ -z "$line" ] && continue
+        case "$line" in \#*) continue ;; esac
+        case "$line" in *=*) ;; *) continue ;; esac
+
+        key="${line%%=*}"
+        val="${line#*=}"
+
+        case "$key" in
+            [A-Za-z_]*) ;;
+            *) echo "runit.sh: $enc: bad variable name '$key'" >&2; exit 1 ;;
+        esac
+        if [ -n "$(printf '%s' "$key" | tr -d 'A-Za-z0-9_')" ]; then
+            echo "runit.sh: $enc: bad variable name '$key'" >&2; exit 1
+        fi
+
+        # Strip one matching pair of surrounding quotes, the way Compose's dotenv
+        # parser does. This matters: the quotes are load-bearing on values
+        # containing '$' — an unquoted scrypt hash gets its $-segments expanded as
+        # variables and silently mangled. Here the value is passed through
+        # literally either way, but the quotes must still come off or they end up
+        # inside the value.
+        n=${#val}
+        if [ "$n" -ge 2 ]; then
+            first="${val:0:1}"; last="${val:n-1:1}"
+            if { [ "$first" = '"' ] && [ "$last" = '"' ]; } || \
+               { [ "$first" = "'" ] && [ "$last" = "'" ]; }; then
+                inner="${val:1:n-2}"
+                # A double-quoted dotenv value may carry escapes (\n, \t) that
+                # Compose would decode and this parser would not. Refuse rather
+                # than pass through something subtly different.
+                case "$inner" in
+                    *\\*) echo "runit.sh: $enc: $key has a backslash escape this parser cannot reproduce" >&2; exit 1 ;;
+                esac
+                val="$inner"
+            fi
+        fi
+
+        if [ -n "${CLAIMED_BY[$key]:-}" ]; then
+            echo "runit.sh: $key is defined in both ${CLAIMED_BY[$key]}/enc.env and $enc." >&2
+            echo "          The environment is one namespace — one of those values would be" >&2
+            echo "          lost silently. Prefix it per service and map it back in that" >&2
+            echo "          service's compose.yml \`environment:\` block." >&2
+            exit 1
+        fi
+        CLAIMED_BY[$key]="$svc"
+
+        export "$key=$val"
+        EXPORTED+=("$key")
+        count=$((count + 1))
+    done <<< "$plaintext"
+
+    printf '  %-18s %2d variables\n' "$enc" "$count" >&2
 done
+unset plaintext line val inner
 
-if [ "$DECRYPT_ONLY" -eq 1 ]; then
-    echo "--decrypt-only: stopping before docker compose."
+if [ "$NAMES_ONLY" -eq 1 ]; then
+    printf '%s\n' "${EXPORTED[@]}" | sort
     exit 0
 fi
 
-# Parse the whole project before acting on it, so a bad env file or compose edit
-# fails here rather than halfway through starting containers.
+# Parse the whole project before acting on it, so a missing variable or a bad
+# compose edit fails here rather than halfway through starting containers.
 docker compose config --quiet
 
-echo "Running: docker compose ${COMPOSE_ARGS[*]}"
-set +e
-docker compose "${COMPOSE_ARGS[@]}"
-rc=$?
-set -e
-
-if [ "$CLEAN" -eq 1 ]; then
-    # Note this leaves the project unusable until the next ./runit.sh: every later
-    # compose command (ps, logs, down) re-parses env_file and fails without these.
-    for svc in "${SERVICES[@]}"; do rm -f "$svc/.env"; done
-    echo "--clean: removed the decrypted .env files."
-fi
-
-exit $rc
+echo "Running: docker compose ${COMPOSE_ARGS[*]}" >&2
+exec docker compose "${COMPOSE_ARGS[@]}"

@@ -23,11 +23,12 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.dnschallenge.delaybeforecheck=60"
       - "--certificatesresolvers.letsencrypt.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53"
     
-    env_file:
-      - .env
-
-    #environment:
-    #  - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+    # Comes from traefik/enc.env via ./runit.sh, which decrypts into this
+    # process's environment. There is no traefik/.env to fall back on, so a bare
+    # `docker compose up` fails right here rather than starting a proxy that
+    # cannot answer the DNS-01 challenge and silently serves no certificate.
+    environment:
+      CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN:?set CF_DNS_API_TOKEN in traefik/enc.env, and start with ./runit.sh}
 
     extra_hosts:
       - "host.docker.internal:host-gateway"

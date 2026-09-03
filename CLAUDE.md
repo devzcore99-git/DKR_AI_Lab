@@ -86,34 +86,55 @@ record of the intent, and reading the live file means `docker exec`. Verify a ch
 with `docker exec hermes-agent hermes -z "Reply with exactly: MODEL OK" -t ""` — the
 config parses fine when the model name is wrong.
 
-**Secrets — the `.env` files are generated, not authored.** Each service commits an
-age-encrypted `<service>/enc.env`; `./runit.sh` decrypts all six into the `.env`
-beside each one and then runs `docker compose` (passing its arguments through, so
-`./runit.sh down` and `./runit.sh logs -f hermes` work). Compose cannot read an
-enc.env — `env_file:` and `${VAR}` interpolation both want a plain file — so *nothing
-starts without running it first*. Editing a `.env` by hand is a change that the next
-`./runit.sh` silently overwrites: edit `sops <service>/enc.env` instead, which
+**Secrets — there are no `.env` files, and `./runit.sh` is the only way in.** Each
+service commits an age-encrypted `<service>/enc.env`. `./runit.sh` decrypts all six
+into *its own environment* and execs `docker compose` there (passing arguments
+through, so `./runit.sh ps`, `./runit.sh down`, `./runit.sh logs -f hermes` all work).
+Nothing plaintext is written to disk. The consequence is absolute: a bare `docker
+compose` command of any kind — `ps`, `down`, `config` — dies at parse time on the
+first `${VAR:?}` it cannot resolve. That error means "you forgot ./runit.sh", not
+that anything is misconfigured. Edit a secret with `sops <service>/enc.env`, which
 round-trips through `$EDITOR` without putting plaintext on disk.
+
+**A variable in `enc.env` reaches nothing on its own.** `env_file:` is gone, so each
+service's `compose.yml` `environment:` block is the complete, explicit list of what
+that container receives, wired with `${VAR}`. Add a variable to `enc.env` and forget
+the compose file and it is exported into the environment, ignored by Compose, and
+never seen by the application — no error. That is the standing cost of this design;
+`:?` on anything genuinely required is what buys the error back.
+
+**Quoting in an `enc.env` is significant, and asymmetric.** Values are passed through
+literally, but one matching pair of surrounding quotes is stripped. A value containing
+`$` **must** be quoted: unquoted, the dotenv parser expands its `$`-segments as
+variables and silently mangles it. `HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH` is a
+scrypt hash of the form `scrypt$N$r$p$...` and is single-quoted for exactly this
+reason — unquoting it produces a hash that no password matches, with no error
+anywhere. This also makes eyeballing two values misleading: `open-webui/enc.env`
+quotes some values the other files leave bare, so identical secrets do not look
+identical. `runit.sh` refuses a double-quoted value containing a backslash rather
+than pass through an escape it would decode differently from Compose.
 
 `.sops.yaml` encrypts by variable *name* (`KEY|TOKEN|SECRET|PASSWORD|HASH|USERNAME|
 CREDENTIAL`), leaving everything else legible. So a new secret whose name misses that
 regex is committed in the clear, and **comments are never encrypted** — a value in a
 `#` line goes to the repo plaintext. The root `.env` is out of the scheme on purpose:
-it holds only `COMPOSE_PROFILES`, host-specific and written by `detect-gpu.sh`.
+it holds only `COMPOSE_PROFILES`, host-specific and written by `detect-gpu.sh`, and
+Compose reads it directly.
 
-The `.example` siblings are still the documentation, and still gitignore-paired with
+The `enc.env.example` siblings are the documentation — they are not copied anywhere,
+they describe what an `enc.env` must contain. Still gitignore-paired with
 `traefik/letsencrypt/acme.json` and `SearXNG/core-config/settings.yml` — update both
 in the same commit. Name variables, never values: `CF_DNS_API_TOKEN`,
 `OPENWEBUI_OPENAI_API_KEY`, `WEBUI_SECRET_KEY`, `BRAVE_API_KEY`, `server.secret_key`.
 
-**Secrets shared between services are namespaced by service.** A service `.env` is a
-namespace only because `include:` resolves interpolation against each file's own
-directory; bare names collide the moment anything flattens them into one environment,
-keeping one value and dropping the other with no error. So the two shared names carry
-a service prefix in `enc.env`, and `open-webui/compose.yml` / `hermes/compose.yml` map
-them back to the plain names the applications read via `environment:`, which wins over
-`env_file:`. Change a name in `enc.env` alone and Open WebUI fails loudly (`:?`) while
-Hermes fails silently (`:-`, where empty reads as absent).
+**Secrets shared between services are namespaced by service, and must stay that way.**
+All six `enc.env` files are now loaded into one flat environment, so two services
+defining the same name is a real collision rather than a latent one. `runit.sh`
+refuses it: it tracks which service claimed each name and exits with both filenames.
+So the shared names carry a service prefix in `enc.env` — `OPENWEBUI_`, `HERMES_` —
+and `open-webui/compose.yml` / `hermes/compose.yml` map them back to the plain names
+the applications read. The prefixed names stay host-side and no longer leak into the
+containers, which `env_file:` used to do.
 
 `OPENWEBUI_OPENAI_API_KEY` and `HERMES_OPENAI_API_KEY` are genuinely different keys for
 different backends. Brave is the opposite case and worth knowing before rotating it:

@@ -9,23 +9,28 @@ services:
     image: ghcr.io/open-webui/open-webui:main
     #ports:
     #  - "3000:8080"
-    env_file:
-      - .env
     environment:
-      # Two keys arrive from .env under namespaced names and are mapped back to
-      # the plain ones the application reads. The namespacing is deliberate:
-      # hermes/enc.env holds an OPENAI_API_KEY and a BRAVE_SEARCH_API_KEY too,
-      # with different values, and the only thing keeping them apart is that
-      # `include:` gives each service file its own directory .env. Under any one
-      # flat environment the names would collide and one value would win
-      # silently. `environment:` beats `env_file:`, so this mapping is what the
-      # container actually sees.
+      # Every value here comes from open-webui/enc.env, decrypted into the
+      # environment by ./runit.sh. There is no open-webui/.env any more, so this
+      # block is the complete list of what the container receives — add a
+      # variable to enc.env and it goes nowhere until it is named here too.
+      #
+      # The two API keys are namespaced on the host side because hermes/enc.env
+      # holds names that would otherwise collide in the one flat environment, and
+      # are mapped back here to the plain names the application reads.
       #
       # Required — no default, so a missing key fails the whole project at parse
       # time rather than starting a chat front end that cannot reach a model.
-      OPENAI_API_KEY: ${OPENWEBUI_OPENAI_API_KEY:?set OPENWEBUI_OPENAI_API_KEY in open-webui/.env}
-      # Optional: only read when WEB_SEARCH_ENGINE=brave. Empty is the same as
-      # absent to Open WebUI, so the SearXNG option needs no change here.
+      OPENAI_API_KEY: ${OPENWEBUI_OPENAI_API_KEY:?set OPENWEBUI_OPENAI_API_KEY in open-webui/enc.env, and start with ./runit.sh}
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:?set OPENAI_API_BASE_URL in open-webui/enc.env}
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?set WEBUI_SECRET_KEY in open-webui/enc.env}
+      WEBUI_AUTH: ${WEBUI_AUTH:-False}
+
+      # Web search. Optional: leave BRAVE_SEARCH_API_KEY empty and pick the
+      # SearXNG engine instead — empty reads as absent to Open WebUI.
+      ENABLE_WEB_SEARCH: ${ENABLE_WEB_SEARCH:-False}
+      WEB_SEARCH_ENGINE:
+      WEB_SEARCH_RESULT_COUNT: ${WEB_SEARCH_RESULT_COUNT:-5}
       BRAVE_SEARCH_API_KEY: ${OPENWEBUI_BRAVE_SEARCH_API_KEY:-}
 
       # MCPJungle tool groups, pre-registered as MCP tool servers so a fresh
