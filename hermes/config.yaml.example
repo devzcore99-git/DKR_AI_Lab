@@ -1,8 +1,10 @@
-# hermes/config.yaml.example — copy to hermes-data/config.yaml before the first
-# `up`, then edit it there.
+# hermes/config.yaml.example — the seed for hermes-data/config.yaml.
 #
-#   mkdir -p hermes/hermes-data
-#   cp hermes/config.yaml.example hermes/hermes-data/config.yaml
+# ./runit.sh copies this into hermes/hermes-data/config.yaml when that file does
+# not exist, so a fresh clone comes up on the right model with no manual step. It
+# only ever creates: an existing config.yaml is left alone, because Hermes
+# rewrites that file itself when settings change in the dashboard. Once seeded,
+# edit hermes-data/config.yaml — changes here do not reach a running install.
 #
 # THIS is where the agent's model is chosen. Not hermes/.env, and not
 # OPENAI_BASE_URL — those are read by individual plugins, but `model.default`

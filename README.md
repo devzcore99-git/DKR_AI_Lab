@@ -117,14 +117,15 @@ all:
 ```sh
 cp SearXNG/core-config/settings.yml.example SearXNG/core-config/settings.yml
 cp .env.example              .env          # COMPOSE_PROFILES only
-
-mkdir -p hermes/hermes-data
-cp hermes/config.yaml.example hermes/hermes-data/config.yaml
 ```
 
-That last pair is not optional in the way it looks. Hermes chooses its model
-from `hermes-data/config.yaml`; skip it and the container starts an agent
-pointed at the image's built-in default rather than at anything in this lab.
+`hermes/hermes-data/config.yaml` used to belong in that list and no longer does:
+`./runit.sh` seeds it from `hermes/config.yaml.example` when it is missing. That
+step was easy to skip, and skipping it was invisible — Hermes chooses its model
+from that file, so without it the container starts an agent pointed at the
+image's built-in default rather than at anything in this lab, and looks healthy
+doing it. Seeding only ever creates the file; an existing one is left alone,
+since Hermes rewrites it itself when dashboard settings change.
 
 The root `.env` is deliberately *not* encrypted: it holds only `COMPOSE_PROFILES`,
 which is host-specific and written by `llama.cpp/detect-gpu.sh`.

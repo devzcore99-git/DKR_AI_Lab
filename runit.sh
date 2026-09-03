@@ -148,6 +148,38 @@ if [ "$NAMES_ONLY" -eq 1 ]; then
     exit 0
 fi
 
+# Hermes chooses its model from hermes-data/config.yaml, which is gitignored and
+# therefore absent on a fresh clone. Left absent, the container does not fail —
+# it bootstraps its own config on the image's built-in default model and comes up
+# looking entirely healthy, answering from the wrong place. Seed it here so that
+# cannot happen silently.
+#
+# Only ever creates the file; Hermes rewrites config.yaml itself when settings
+# change in the dashboard, so overwriting one that exists would discard real
+# state.
+HERMES_DATA="hermes/hermes-data"
+HERMES_CONFIG="$HERMES_DATA/config.yaml"
+HERMES_SEED="hermes/config.yaml.example"
+
+if [ ! -e "$HERMES_DATA" ]; then
+    # Create it as this user rather than letting Docker create it as root. The
+    # container chowns it to its own uid (10000) on first run either way.
+    mkdir -p "$HERMES_DATA"
+fi
+
+if [ ! -r "$HERMES_DATA" ] || [ ! -x "$HERMES_DATA" ]; then
+    # The container has taken ownership (uid 10000, mode 700), so this is an
+    # existing install and not a fresh one. We cannot even stat inside it — which
+    # would make the -e test below read as "missing" and the copy fail. Say so
+    # once and leave it alone.
+    echo "  $HERMES_DATA is owned by the container; leaving config.yaml alone" >&2
+elif [ ! -e "$HERMES_CONFIG" ]; then
+    [ -f "$HERMES_SEED" ] || { echo "runit.sh: missing $HERMES_SEED" >&2; exit 1; }
+    cp "$HERMES_SEED" "$HERMES_CONFIG"
+    echo "  seeded $HERMES_CONFIG from $HERMES_SEED — edit it there, not in the" >&2
+    echo "  example, and re-run to apply. It sets which model the agent uses." >&2
+fi
+
 # Parse the whole project before acting on it, so a missing variable or a bad
 # compose edit fails here rather than halfway through starting containers.
 docker compose config --quiet

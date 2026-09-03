@@ -82,7 +82,11 @@ machine over the LAN, not AI-LAB), keyed by `HERMES_CUSTOM_LLM_CODER_MID_HAM51_C
 — the variable name is what `key_env:` names, so the two rename together. `https` is
 required: that Traefik binds 443 alone too. `hermes-data/` is gitignored and the
 container chowns it to uid 10000, so `hermes/config.yaml.example` is the only readable
-record of the intent, and reading the live file means `docker exec`. Verify a change
+record of the intent, and reading the live file means `docker exec`. `./runit.sh` seeds
+config.yaml from that example when it is missing, and only then — it never overwrites,
+because Hermes rewrites the file itself. Once the container owns the directory the host
+cannot even stat inside it, so the seeder detects that and says it is skipping rather
+than misreading it as a fresh install. Verify a change
 with `docker exec hermes-agent hermes -z "Reply with exactly: MODEL OK" -t ""` — the
 config parses fine when the model name is wrong.
 
