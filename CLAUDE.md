@@ -140,8 +140,10 @@ and `open-webui/compose.yml` / `hermes/compose.yml` map them back to the plain n
 the applications read. The prefixed names stay host-side and no longer leak into the
 containers, which `env_file:` used to do.
 
-`OPENWEBUI_OPENAI_API_KEY` and `HERMES_OPENAI_API_KEY` are genuinely different keys for
-different backends. Brave is the opposite case and worth knowing before rotating it:
+`OPENWEBUI_OPENAI_API_KEY` and `HERMES_OPENAI_API_KEY` now hold the same value: both
+services point at `https://llm-coder-mid.ham51.com/v1` (model `coder-mid`), which
+answers 401 to any other key. They stay separate variables so either can be repointed
+without touching the other. Brave is the same shape and worth knowing before rotating:
 `OPENWEBUI_BRAVE_SEARCH_API_KEY`, `HERMES_BRAVE_SEARCH_API_KEY` and mcpjungle's
 `BRAVE_API_KEY` are three copies of the *same* value, under two names, that nothing
 keeps in step — so a rotation is three edits, and comparing them by eye is misleading
@@ -205,6 +207,22 @@ Settings → External Tools makes the UI authoritative and later edits to the co
 file do nothing until that row is deleted. A group is reached at
 `http://mcpjungle:8080/v0/groups/<name>/mcp` over AI-LAB, and only when a chat uses
 it — nothing is fetched at startup, so the two services need no `depends_on`.
+
+**And so does the model backend — this is the same trap, on the setting most likely
+to be changed.** `OPENAI_API_BASE_URL` and `OPENAI_API_KEY` are PersistentConfig in
+Open WebUI: they seed `webui.db` while the row is absent and are ignored afterwards.
+On the lab host, whose `dkr_ai_lab_open-webui2` volume is long since populated,
+editing `open-webui/enc.env` and restarting therefore changes *nothing* — no error,
+the old backend simply stays. Change it in Admin Settings → Connections instead, or
+clear the row and restart:
+
+```sh
+./runit.sh exec open-webui python -c \
+  "import sqlite3;sqlite3.connect('/app/backend/data/webui.db').execute(\"delete from config where key='openai'\").connection.commit()"
+```
+
+The enc.env value is still what a fresh volume gets, so keep the two in step rather
+than treating the UI as the only record.
 
 ## Dependencies
 
