@@ -12,6 +12,22 @@ services:
     env_file:
       - .env
     environment:
+      # Two keys arrive from .env under namespaced names and are mapped back to
+      # the plain ones the application reads. The namespacing is deliberate:
+      # hermes/enc.env holds an OPENAI_API_KEY and a BRAVE_SEARCH_API_KEY too,
+      # with different values, and the only thing keeping them apart is that
+      # `include:` gives each service file its own directory .env. Under any one
+      # flat environment the names would collide and one value would win
+      # silently. `environment:` beats `env_file:`, so this mapping is what the
+      # container actually sees.
+      #
+      # Required — no default, so a missing key fails the whole project at parse
+      # time rather than starting a chat front end that cannot reach a model.
+      OPENAI_API_KEY: ${OPENWEBUI_OPENAI_API_KEY:?set OPENWEBUI_OPENAI_API_KEY in open-webui/.env}
+      # Optional: only read when WEB_SEARCH_ENGINE=brave. Empty is the same as
+      # absent to Open WebUI, so the SearXNG option needs no change here.
+      BRAVE_SEARCH_API_KEY: ${OPENWEBUI_BRAVE_SEARCH_API_KEY:-}
+
       # MCPJungle tool groups, pre-registered as MCP tool servers so a fresh
       # volume comes up with them already wired instead of needing Admin
       # Settings -> External Tools clicked through by hand.

@@ -72,6 +72,20 @@ the container runs normally while hermes.ham51.com never answers. Store
 `_PASSWORD_HASH` (scrypt), not `_PASSWORD`, and set `_SECRET` or every restart
 invalidates all sessions.
 
+**Hermes picks its model in `hermes-data/config.yaml`, not from the environment.**
+`model.default` + the matching `custom_providers` entry are what the agent uses every
+turn; `OPENAI_BASE_URL` reaches only individual plugins. Setting the env var alone
+therefore *looks* like it worked — container up, dashboard answering, agent replying
+out of the image's built-in default. The lab's is `coder-mid` at
+`https://llm-coder-mid.ham51.com/v1`, llama.cpp on the DKR_AI_Lab2 host (a separate
+machine over the LAN, not AI-LAB), keyed by `HERMES_CUSTOM_LLM_CODER_MID_HAM51_COM_API_KEY`
+— the variable name is what `key_env:` names, so the two rename together. `https` is
+required: that Traefik binds 443 alone too. `hermes-data/` is gitignored and the
+container chowns it to uid 10000, so `hermes/config.yaml.example` is the only readable
+record of the intent, and reading the live file means `docker exec`. Verify a change
+with `docker exec hermes-agent hermes -z "Reply with exactly: MODEL OK" -t ""` — the
+config parses fine when the model name is wrong.
+
 **Secrets — the `.env` files are generated, not authored.** Each service commits an
 age-encrypted `<service>/enc.env`; `./runit.sh` decrypts all six into the `.env`
 beside each one and then runs `docker compose` (passing its arguments through, so
@@ -90,10 +104,26 @@ it holds only `COMPOSE_PROFILES`, host-specific and written by `detect-gpu.sh`.
 The `.example` siblings are still the documentation, and still gitignore-paired with
 `traefik/letsencrypt/acme.json` and `SearXNG/core-config/settings.yml` — update both
 in the same commit. Name variables, never values: `CF_DNS_API_TOKEN`,
-`OPENAI_API_KEY`, `WEBUI_SECRET_KEY`, `BRAVE_SEARCH_API_KEY`, `BRAVE_API_KEY`,
-`server.secret_key`. Brave is keyed twice, from separate files: `open-webui/.env` for
-Open WebUI's own web search, `mcpjungle/.env` for the Brave MCP server. The age
-identity (`~/.config/sops/age/keys.txt`) is the only key, with no backup in the repo.
+`OPENWEBUI_OPENAI_API_KEY`, `WEBUI_SECRET_KEY`, `BRAVE_API_KEY`, `server.secret_key`.
+
+**Secrets shared between services are namespaced by service.** A service `.env` is a
+namespace only because `include:` resolves interpolation against each file's own
+directory; bare names collide the moment anything flattens them into one environment,
+keeping one value and dropping the other with no error. So the two shared names carry
+a service prefix in `enc.env`, and `open-webui/compose.yml` / `hermes/compose.yml` map
+them back to the plain names the applications read via `environment:`, which wins over
+`env_file:`. Change a name in `enc.env` alone and Open WebUI fails loudly (`:?`) while
+Hermes fails silently (`:-`, where empty reads as absent).
+
+`OPENWEBUI_OPENAI_API_KEY` and `HERMES_OPENAI_API_KEY` are genuinely different keys for
+different backends. Brave is the opposite case and worth knowing before rotating it:
+`OPENWEBUI_BRAVE_SEARCH_API_KEY`, `HERMES_BRAVE_SEARCH_API_KEY` and mcpjungle's
+`BRAVE_API_KEY` are three copies of the *same* value, under two names, that nothing
+keeps in step — so a rotation is three edits, and comparing them by eye is misleading
+because `open-webui/enc.env` quotes its value and the others do not.
+
+The age identity (`~/.config/sops/age/keys.txt`) is the only key, with no backup in
+the repo.
 
 **llama.cpp is profile-gated.** `llama.cpp/compose.yml` defines the same server twice
 — `llama-cuda` (profile `cuda`, `server-cuda`, needs the NVIDIA Container Toolkit) and

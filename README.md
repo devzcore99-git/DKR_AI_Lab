@@ -110,7 +110,14 @@ cp mcpjungle/.env.example    mcpjungle/.env
 cp llama.cpp/.env.example    llama.cpp/.env
 cp hermes/.env.example       hermes/.env
 cp .env.example              .env
+
+mkdir -p hermes/hermes-data
+cp hermes/config.yaml.example hermes/hermes-data/config.yaml
 ```
+
+That last pair is not optional in the way it looks. Hermes chooses its model
+from `hermes-data/config.yaml`; skip it and the container starts an agent
+pointed at the image's built-in default rather than at anything in this lab.
 
 The root `.env` is deliberately *not* encrypted: it holds only `COMPOSE_PROFILES`,
 which is host-specific and written by `llama.cpp/detect-gpu.sh`.
@@ -120,14 +127,15 @@ which is host-specific and written by `llama.cpp/detect-gpu.sh`.
 | File | Variable | Where it comes from |
 | --- | --- | --- |
 | `traefik/.env` | `CF_DNS_API_TOKEN` | Cloudflare API token with *Zone → DNS → Edit* and *Zone → Zone → Read* on your zone |
-| `open-webui/.env` | `OPENAI_API_KEY` | Your LM Studio / llama.cpp key (any value if the backend doesn't check it) |
+| `open-webui/.env` | `OPENWEBUI_OPENAI_API_KEY` | Your LM Studio / llama.cpp key (any value if the backend doesn't check it). Namespaced because `hermes/.env` has its own; `compose.yml` maps it back to `OPENAI_API_KEY` in the container |
 | `open-webui/.env` | `WEBUI_SECRET_KEY` | `openssl rand -base64 32` |
-| `open-webui/.env` | `BRAVE_SEARCH_API_KEY` | https://api-dashboard.search.brave.com/ (omit if using SearXNG) |
+| `open-webui/.env` | `OPENWEBUI_BRAVE_SEARCH_API_KEY` | https://api-dashboard.search.brave.com/ (omit if using SearXNG) |
 | `SearXNG/core-config/settings.yml` | `server.secret_key` | `openssl rand -hex 16` |
-| `mcpjungle/.env` | `BRAVE_API_KEY` | https://api-dashboard.search.brave.com/ — separate from Open WebUI's copy; the gateway's Brave MCP server needs its own |
+| `mcpjungle/.env` | `BRAVE_API_KEY` | https://api-dashboard.search.brave.com/ — a third copy of the same Brave key under a different name (Open WebUI and Hermes hold the other two); one key, three files to update when it rotates |
 | `hermes/.env` | `HERMES_DASHBOARD_BASIC_AUTH_USERNAME` | Any login name you want |
 | `hermes/.env` | `HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH` | The scrypt hash below — **not** the plaintext |
 | `hermes/.env` | `HERMES_DASHBOARD_BASIC_AUTH_SECRET` | `openssl rand -base64 48` |
+| `hermes/.env` | `HERMES_CUSTOM_LLM_CODER_MID_HAM51_COM_API_KEY` | The key for `llm-coder-mid.ham51.com`; the variable name is what `config.yaml`'s `key_env:` points at, so rename both together |
 
 Hermes is the only service here that refuses to serve without credentials, so
 its three are not optional. Generate the password hash with the image's own
@@ -338,10 +346,47 @@ that most needs to be: the agent has local shell execution inside its container
 (`terminal.backend: local`). Like every other service it publishes no host port,
 so Traefik is the only way in.
 
+### Which model it uses
+
+**`hermes-data/config.yaml`, not `hermes/.env`.** This is the one thing about
+Hermes that is easy to get wrong, because setting the environment variables
+looks like it worked: the container starts, the dashboard answers, and the agent
+replies — from the image's built-in default model. `OPENAI_BASE_URL` is read by
+individual plugins; `model.default` in `config.yaml` is what the agent itself
+uses for every turn.
+
+`hermes/config.yaml.example` is the seed, and the only committed record of the
+intended configuration — `hermes-data/` is gitignored. The lab's default is
+llama.cpp on the `DKR_AI_Lab2` host:
+
+```yaml
+model:
+  default: coder-mid
+  provider: custom
+  base_url: https://llm-coder-mid.ham51.com/v1
+  api_key: ${HERMES_CUSTOM_LLM_CODER_MID_HAM51_COM_API_KEY}
+```
+
+`https`, not `http` — that host's Traefik binds 443 alone, exactly like this
+one, so the plaintext port is closed rather than redirecting. Confirm the model
+id against the server rather than assuming it, since llama.cpp reports whatever
+alias it was started with:
+
+```sh
+curl -H "Authorization: Bearer $KEY" https://llm-coder-mid.ham51.com/v1/models
+```
+
+Verify end to end after any change — this runs one real turn through whatever
+`config.yaml` currently names:
+
+```sh
+docker exec hermes-agent hermes -z "Reply with exactly: MODEL OK" -t ""
+```
+
 ### Pointing it at the rest of the lab
 
-Hermes is on AI-LAB, so it addresses the others by name. Uncomment in
-`hermes/.env`:
+Hermes is also on AI-LAB, so it can address the other services by name instead.
+In `hermes/.env`:
 
 ```sh
 OPENAI_BASE_URL=http://llama-gpt-oss:9010/v1   # local inference
@@ -350,7 +395,9 @@ SEARXNG_URL=http://searxng:8080                # private search
 
 `llama-gpt-oss` is a network alias carried by both llama.cpp profiles, so this
 works whichever backend is active — and resolves to nothing when
-`COMPOSE_PROFILES` names neither.
+`COMPOSE_PROFILES` names neither, which is its state on a host where
+`llama.cpp/detect-gpu.sh` has never run. Switching the *model* over to it means
+editing `config.yaml` as well; the variable alone does nothing.
 
 ### State
 

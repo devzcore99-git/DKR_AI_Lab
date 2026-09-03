@@ -25,6 +25,15 @@ services:
       - .env
 
     environment:
+      # Mapped back from the namespaced names in .env. open-webui/enc.env holds
+      # its own OPENAI_API_KEY and BRAVE_SEARCH_API_KEY with different values —
+      # separate backends, separate Brave subscriptions — and per-directory .env
+      # files are the only thing separating them. Both are optional here: the
+      # agent's own model comes from hermes-data/config.yaml, and these are read
+      # by individual plugins. Empty reads as absent.
+      OPENAI_API_KEY: ${HERMES_OPENAI_API_KEY:-}
+      BRAVE_SEARCH_API_KEY: ${HERMES_BRAVE_SEARCH_API_KEY:-}
+
       # The web dashboard is a separate s6-supervised service inside the image,
       # not the main command above. Without HERMES_DASHBOARD its run script
       # exits immediately and the slot reports permanently down — no error, no

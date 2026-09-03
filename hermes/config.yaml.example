@@ -1,0 +1,74 @@
+# hermes/config.yaml.example — copy to hermes-data/config.yaml before the first
+# `up`, then edit it there.
+#
+#   mkdir -p hermes/hermes-data
+#   cp hermes/config.yaml.example hermes/hermes-data/config.yaml
+#
+# THIS is where the agent's model is chosen. Not hermes/.env, and not
+# OPENAI_BASE_URL — those are read by individual plugins, but `model.default`
+# below is what the agent itself uses for every turn. Start Hermes with an empty
+# hermes-data/ and it writes its own config with the image's built-in default
+# model, which is not any of this lab's endpoints; the agent then comes up
+# healthy and answers from the wrong place, or from nowhere at all.
+#
+# Hermes rewrites this file when settings change in the dashboard, keeping
+# timestamped `config.yaml.bak.*` siblings. It is the live file, so this example
+# is the seed and not a mirror — do not expect the two to stay identical.
+#
+# hermes-data/ is gitignored: this example is the only committed record of what
+# the model configuration is supposed to be.
+
+# ── Model ─────────────────────────────────────────────────────────────
+# `coder-mid` is llama.cpp on 192.168.12.193, the DKR_AI_Lab2 host — a separate
+# machine, reached over the LAN rather than over AI-LAB. Confirm the model id
+# rather than assuming it; llama.cpp reports whatever alias it was started with:
+#
+#   curl -H "Authorization: Bearer $KEY" https://llm-coder-mid.ham51.com/v1/models
+#
+# https is not optional. That host's Traefik binds 443 alone, exactly like this
+# one, so http:// reaches a closed port rather than a redirect.
+model:
+  default: coder-mid
+  provider: custom
+  base_url: https://llm-coder-mid.ham51.com/v1
+  # Resolved from the container's environment, which hermes/.env populates via
+  # `env_file:`. Written as ${...} so the key itself never lands in this file —
+  # hermes-data/ is outside the SOPS scheme and nothing here would be encrypted.
+  api_key: ${HERMES_CUSTOM_LLM_CODER_MID_HAM51_COM_API_KEY}
+
+# The same endpoint again, as a selectable provider. `model:` above is what the
+# agent starts with; this is what the dashboard's model picker lists, and the
+# two are separate — setting only one leaves either no choice in the UI or a
+# default the UI cannot explain.
+custom_providers:
+  - name: Llm-coder-mid.ham51.com
+    base_url: https://llm-coder-mid.ham51.com/v1
+    key_env: HERMES_CUSTOM_LLM_CODER_MID_HAM51_COM_API_KEY
+    model: coder-mid
+    models:
+      coder-mid:
+        # What the server reports as n_ctx. Claiming more here does not enlarge
+        # it — the request is simply refused once the prompt exceeds the real
+        # window.
+        context_length: 262144
+
+# ── Alternative: the in-lab llama.cpp ─────────────────────────────────
+# Reached over AI-LAB, so no TLS and no key, but it only exists while
+# COMPOSE_PROFILES (root .env) names cuda or vulkan. `llama-gpt-oss` is the
+# alias both profiles share. The model id is the GGUF that LLAMA_MODEL selects.
+#
+# model:
+#   default: gemma-4-E4B-it
+#   provider: custom
+#   base_url: http://llama-gpt-oss:9010/v1
+#   api_key: not-used
+
+database:
+  # SQLite WAL. The gateway and the dashboard are two processes in one container
+  # sharing state.db, so the default rollback journal serialises them.
+  journal_mode: wal
+
+agent:
+  max_turns: 150
+  reasoning_effort: medium
+  verbose: false
