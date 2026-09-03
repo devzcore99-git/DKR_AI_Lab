@@ -21,10 +21,47 @@ services:
     # fresh hermes-data/. The dashboard is NOT this command; see below.
     command: ["gateway", "run"]
 
-    env_file:
-      - .env
-
     environment:
+      # Every value here comes from hermes/enc.env, decrypted into the environment
+      # by ./runit.sh. There is no hermes/.env any more, so this block is the
+      # complete list of what the container receives.
+      #
+      # Dashboard login. Required in practice: the dashboard binds 0.0.0.0 so
+      # Traefik can reach it, which engages the auth gate, and start_server fails
+      # closed without a provider. `:?` makes that a parse-time error instead of a
+      # container that runs while hermes.ham51.com never answers.
+      #
+      # The scrypt hash is single-quoted in enc.env because it is full of '$'.
+      # Interpolating it here is safe — Compose does not re-interpolate the
+      # result — but unquoting it in enc.env would let the dotenv parser expand
+      # those segments and silently mangle the hash.
+      HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${HERMES_DASHBOARD_BASIC_AUTH_USERNAME:?set it in hermes/enc.env, and start with ./runit.sh}
+      HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH: ${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH:?set it in hermes/enc.env — the scrypt hash, not the password}
+      HERMES_DASHBOARD_BASIC_AUTH_SECRET: ${HERMES_DASHBOARD_BASIC_AUTH_SECRET:?set it in hermes/enc.env, or every restart logs you out}
+
+      # Inference. The agent's own model is hermes-data/config.yaml, not these —
+      # these are read by individual plugins. The custom-provider key is the one
+      # config.yaml names in `key_env:`. All optional; empty reads as absent.
+      # A bare name is pass-through: set from the environment if present,
+      # OMITTED entirely if not. `${VAR:-}` would instead set it to the empty
+      # string, which is a different thing to a plugin testing whether the
+      # variable exists — so use the bare form wherever the name is unchanged.
+      OPENAI_BASE_URL:
+      HERMES_CUSTOM_LLM_CODER_MID_HAM51_COM_API_KEY:
+      # Private search over AI-LAB, if the agent is pointed at it.
+      SEARXNG_URL:
+      # These two are renamed, which pass-through cannot do, so they take the
+      # empty string when unset. Both are set in enc.env.
+      OPENAI_API_KEY: ${HERMES_OPENAI_API_KEY:-}
+      BRAVE_SEARCH_API_KEY: ${HERMES_BRAVE_SEARCH_API_KEY:-}
+
+      # Messaging gateway. Absent is fine — it warns "No messaging platforms
+      # enabled" and keeps running.
+      SLACK_BOT_TOKEN:
+      SLACK_APP_TOKEN:
+      SLACK_ALLOWED_USERS:
+      SLACK_HOME_CHANNEL:
+
       # The web dashboard is a separate s6-supervised service inside the image,
       # not the main command above. Without HERMES_DASHBOARD its run script
       # exits immediately and the slot reports permanently down — no error, no

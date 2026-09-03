@@ -1,8 +1,14 @@
 # ---- Secrets ----
-# Real env files (commit the .example versions instead).
-# NOTE: `<service>/enc.env` is SOPS/age-encrypted and IS tracked on purpose — it is
-# the only copy of the configuration in the repo, and ./runit.sh decrypts it into the
-# .env files ignored here. It does not match these patterns; do not add one for it.
+# `<service>/enc.env` is SOPS/age-encrypted and IS tracked on purpose — it is the
+# only copy of the configuration in the repo. It does not match the patterns
+# below; do not add one for it. `<service>/enc.env.example` documents its
+# plaintext shape and is tracked too.
+#
+# ./runit.sh decrypts enc.env straight into its own environment and no longer
+# writes any `<service>/.env`. These patterns stay as a backstop, so a file
+# created by hand — or left behind by an older checkout — still cannot be
+# committed. The root .env is covered too: it holds only COMPOSE_PROFILES,
+# written by llama.cpp/detect-gpu.sh, and is host-specific.
 .env
 .env.*
 !.env.example

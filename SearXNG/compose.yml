@@ -5,14 +5,15 @@ services:
   #  container_name: searxng-core
     image: docker.io/searxng/searxng:latest
     restart: always
-    env_file:
-      - .env
     environment:
+      # From SearXNG/enc.env via ./runit.sh — no .env file is involved any more.
+      SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:?set SEARXNG_BASE_URL in SearXNG/enc.env, and start with ./runit.sh}
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in SearXNG/enc.env, and start with ./runit.sh}
       # The image ships `valkey: url: false` in its default settings.yml, so the
       # cache is off unless something turns it on. Set here rather than in
       # core-config/settings.yml because that file is gitignored — this is plumbing,
-      # not a secret. Note `environment:` wins over `env_file:`, so overriding this
-      # means editing here, not .env.
+      # not a secret. Set here rather than in enc.env because this is plumbing
+      # that should be version-controlled, not a per-host value.
       SEARXNG_VALKEY_URL: valkey://searxng-valkey:6379/0
     # No published port: Traefik fronts this at https://search.ham51.com and is
     # the only way in. Open WebUI reaches it in-network at http://searxng:8080.
