@@ -2,9 +2,4 @@ include:
   - ./traefik/compose.yml
   - ./open-webui/compose.yml
   - ./SearXNG/compose.yml
-  # Defines two profile-gated services, llama-cuda and llama-vulkan. Neither runs
-  # unless COMPOSE_PROFILES (root .env, written by llama.cpp/detect-gpu.sh) names
-  # one, so including this file is safe on a host with no GPU.
-  #- ./llama.cpp/compose.yml
   - ./mcpjungle/compose.yml
-  - ./hermes/compose.yml

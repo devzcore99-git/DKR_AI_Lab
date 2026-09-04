@@ -33,24 +33,6 @@ http:
         certResolver: letsencrypt
       service: searxng-service
 
-    llamacpp:
-      entryPoints:
-        - port443
-      rule: "Host(`llm.ham51.com`)"
-      tls:
-        certResolver: letsencrypt
-      service: llamacpp-service
-
-    hermes:
-      entryPoints:
-        - port443
-      rule: "Host(`hermes.ham51.com`)"
-      tls:
-        certResolver: letsencrypt
-      service: hermes-service
-
-
-
   services:
 
     openwebui-service:
@@ -72,17 +54,3 @@ http:
       loadBalancer:
         servers:
           - url: "http://searxng:8080"
-
-    llamacpp-service:
-      loadBalancer:
-        servers:
-          - url: "http://llama-gpt-oss:9010"
-
-    # The Hermes web dashboard. It is a WebSocket app (/api/ws) as well as
-    # HTTP; Traefik v3 proxies the upgrade transparently, so no extra config.
-    # Unlike the three unauthenticated services above, this one sits behind a
-    # username/password gate — see hermes/.env.example.
-    hermes-service:
-      loadBalancer:
-        servers:
-          - url: "http://hermes:9119"

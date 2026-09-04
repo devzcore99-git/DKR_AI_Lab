@@ -1,9 +1,9 @@
 # Open WebUI — the chat front end for the lab.
 #
 # Included from the root `compose.yaml`; run everything from the project root.
-# Secrets and the model backend URL live in `open-webui/.env` (gitignored, see
-# .env.example). Non-secret configuration that should be version-controlled —
-# the MCP tool servers below — lives here instead.
+# Secrets and the model backend URL live in `open-webui/enc.env` (age-encrypted,
+# see enc.env.example). Non-secret configuration that should be
+# version-controlled — the MCP tool servers below — lives here instead.
 services:
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
@@ -15,9 +15,9 @@ services:
       # block is the complete list of what the container receives — add a
       # variable to enc.env and it goes nowhere until it is named here too.
       #
-      # The two API keys are namespaced on the host side because hermes/enc.env
-      # holds names that would otherwise collide in the one flat environment, and
-      # are mapped back here to the plain names the application reads.
+      # The two API keys are namespaced on the host side, because runit.sh loads
+      # every service's enc.env into one flat environment; they are mapped back
+      # here to the plain names the application reads.
       #
       # Required — no default, so a missing key fails the whole project at parse
       # time rather than starting a chat front end that cannot reach a model.
