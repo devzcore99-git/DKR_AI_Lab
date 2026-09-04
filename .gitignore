@@ -7,8 +7,7 @@
 # ./runit.sh decrypts enc.env straight into its own environment and no longer
 # writes any `<service>/.env`. These patterns stay as a backstop, so a file
 # created by hand — or left behind by an older checkout — still cannot be
-# committed. The root .env is covered too: it holds only COMPOSE_PROFILES,
-# written by llama.cpp/detect-gpu.sh, and is host-specific.
+# committed. The root .env is covered too; nothing in this project uses one.
 .env
 .env.*
 !.env.example
@@ -21,10 +20,6 @@ traefik/acme.json
 # SearXNG runtime settings — contains server.secret_key
 SearXNG/core-config/settings.yml
 
-# Hermes agent state — API keys, auth tokens, databases, logs, session history.
-# The container populates it on first run; it is the only copy.
-hermes/hermes-data/
-
 # ---- Local / OS noise ----
 .DS_Store
 Thumbs.db
@@ -34,12 +29,6 @@ Thumbs.db
 # ---- Editors ----
 .vscode/
 .idea/
-
-# ---- Models & data (never commit weights) ----
-models/
-*.gguf
-*.safetensors
-*.bin
 
 # Added by /project-bootstrap — workspace standard patterns.
 .AppleDouble

@@ -10,7 +10,7 @@
 #
 #   ./runit.sh                 decrypt, then `docker compose up -d`
 #   ./runit.sh down            decrypt, then `docker compose down`
-#   ./runit.sh logs -f hermes  decrypt, then `docker compose logs -f hermes`
+#   ./runit.sh logs -f traefik decrypt, then `docker compose logs -f traefik`
 #   ./runit.sh --names         list the variable names that would be exported
 #
 # Any argument that is not a flag of this script is passed to `docker compose`
@@ -31,10 +31,9 @@ set -euo pipefail
 # *separate* project with its own volumes.
 cd "$(dirname "$0")"
 
-# The six services whose enc.env this script manages. The root .env is
-# deliberately absent: it holds only COMPOSE_PROFILES, which is host-specific and
-# not a secret — llama.cpp/detect-gpu.sh writes it, and Compose reads it directly.
-SERVICES=(traefik open-webui SearXNG llama.cpp mcpjungle hermes)
+# The four services whose enc.env this script manages. There is no root .env:
+# nothing in this project needs a project-wide Compose variable any more.
+SERVICES=(traefik open-webui SearXNG mcpjungle)
 
 NAMES_ONLY=0
 COMPOSE_ARGS=()
@@ -66,8 +65,8 @@ fi
 # Every name exported so far, and which service claimed it. The environment is one
 # flat namespace, unlike the per-directory .env files this replaced, so two
 # services defining the same name would leave one value silently overwritten.
-# Refuse instead: prefix the name per service (OPENWEBUI_/HERMES_) and map it back
-# in that service's compose.yml `environment:` block.
+# Refuse instead: prefix the name per service (OPENWEBUI_) and map it back in
+# that service's compose.yml `environment:` block.
 declare -A CLAIMED_BY=()
 EXPORTED=()
 
@@ -147,62 +146,6 @@ if [ "$NAMES_ONLY" -eq 1 ]; then
     printf '%s\n' "${EXPORTED[@]}" | sort
     exit 0
 fi
-
-# Hermes chooses its model from hermes-data/config.yaml, which is gitignored and
-# therefore absent on a fresh clone. Left absent, the container does not fail —
-# it bootstraps its own config on the image's built-in default model and comes up
-# looking entirely healthy, answering from the wrong place. Seed it here so that
-# cannot happen silently.
-#
-# Only ever creates the file; Hermes rewrites config.yaml itself when settings
-# change in the dashboard, so overwriting one that exists would discard real
-# state.
-HERMES_DATA="hermes/hermes-data"
-HERMES_CONFIG="$HERMES_DATA/config.yaml"
-HERMES_SEED="hermes/config.yaml.example"
-
-# NOTHING BELOW MAY ABORT THE SCRIPT. This is a convenience that saves a fresh
-# clone from booting Hermes on the wrong model; it is not a precondition for
-# running the lab. Under `set -e` an unguarded mkdir or cp that hits a read-only
-# checkout, a root-owned directory, or a full disk would take the entire bring-up
-# down with it — every service, over a file only one of them reads. So every step
-# here is `|| warn`, and the script carries on either way.
-seed_hermes_config() {
-    if [ ! -e "$HERMES_DATA" ]; then
-        # Create it as this user rather than letting Docker create it as root.
-        # The container chowns it to its own uid (10000) on first run either way.
-        if ! mkdir -p "$HERMES_DATA" 2>/dev/null; then
-            echo "  cannot create $HERMES_DATA (permission denied?) — Docker will" >&2
-            echo "  create it as root, and Hermes will start on its built-in default" >&2
-            echo "  model. Fix by hand: mkdir -p $HERMES_DATA && cp $HERMES_SEED $HERMES_CONFIG" >&2
-            return 0
-        fi
-    fi
-
-    if [ ! -r "$HERMES_DATA" ] || [ ! -x "$HERMES_DATA" ]; then
-        # The container has taken ownership (uid 10000, mode 700), so this is an
-        # existing install and not a fresh one. We cannot even stat inside it —
-        # which would make the -e test below read as "missing" and the copy fail.
-        # Say so once and leave it alone.
-        echo "  $HERMES_DATA is owned by the container; leaving config.yaml alone" >&2
-        return 0
-    fi
-
-    [ -e "$HERMES_CONFIG" ] && return 0
-
-    if [ ! -f "$HERMES_SEED" ]; then
-        echo "  $HERMES_SEED is missing; not seeding $HERMES_CONFIG" >&2
-        return 0
-    fi
-    if ! cp "$HERMES_SEED" "$HERMES_CONFIG" 2>/dev/null; then
-        echo "  could not write $HERMES_CONFIG — Hermes will start on its built-in" >&2
-        echo "  default model rather than this lab's. Copy it by hand to fix." >&2
-        return 0
-    fi
-    echo "  seeded $HERMES_CONFIG from $HERMES_SEED — edit it there, not in the" >&2
-    echo "  example, and re-run to apply. It sets which model the agent uses." >&2
-}
-seed_hermes_config
 
 # Parse the whole project before acting on it, so a missing variable or a bad
 # compose edit fails here rather than halfway through starting containers.

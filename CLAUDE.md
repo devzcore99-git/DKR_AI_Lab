@@ -4,24 +4,17 @@ Guidance for Claude Code when working in this project.
 
 ## Project Overview
 
-Self-hosted AI lab — Open WebUI, llama.cpp, SearXNG, the MCPJungle MCP gateway, and
-the Hermes agent behind one Traefik v3 proxy with Let's Encrypt DNS-01 TLS.
-`README.md` is the setup guide; keep it in sync.
+Self-hosted AI lab — Open WebUI, SearXNG and the MCPJungle MCP gateway behind one
+Traefik v3 proxy with Let's Encrypt DNS-01 TLS. Inference is not run here: Open
+WebUI points at `coder-mid` on the DKR_AI_Lab2 host over the LAN. `README.md` is
+the setup guide; keep it in sync.
 
 ## Conventions
 
-**Bring-up.** The root `compose.yaml` is only an `include:` list of six per-service
-files (`traefik/`, `open-webui/`, `SearXNG/`, `llama.cpp/`, `mcpjungle/`, `hermes/`);
-run every command from the project root (`docker compose up -d`). Running `docker
-compose -f <service>/compose.yml` from a service directory starts a *separate* project.
-
-**Two kinds of `.env`, and mixing them up fails silently.** `include:` resolves each
-file's relative paths *and* its interpolation `.env` against that file's own directory
-— which is why `mcpjungle/.env` supplies `BRAVE_API_KEY` and `llama.cpp/.env` supplies
-`LLAMA_MODEL`. But `COMPOSE_PROFILES` is read once *per project*, so it only works in
-the root `.env`. Put it in `llama.cpp/.env` and Compose reads the file, ignores the
-variable, and leaves both llama services absent with no error at all. Root `.env` also
-feeds interpolation everywhere as a fallback; service `.env` files do not leak upward.
+**Bring-up.** The root `compose.yaml` is only an `include:` list of four per-service
+files (`traefik/`, `open-webui/`, `SearXNG/`, `mcpjungle/`); run every command from the
+project root (`docker compose up -d`). Running `docker compose -f <service>/compose.yml`
+from a service directory starts a *separate* project.
 
 **State — read this before renaming anything.** `compose.yaml` has no top-level
 `name:`, so Compose derives the project name from the directory basename
@@ -33,9 +26,6 @@ empty volume and orphans all chat history; adding `name:` later does the same un
 the volume is renamed too. Check `docker volume ls` first. `down -v` destroys all five.
 Only the MCP registry survives that: the `mcpjungle-register-*` and
 `mcpjungle-create-groups` one-shot jobs re-apply it from JSON on every `up`.
-Hermes is the exception to all of this — its state is the `hermes/hermes-data/` bind
-mount, not a named volume, so `down -v` leaves it alone and moving the directory moves
-the agent. It is still the only copy, with no backup configured.
 
 **Networks.** Everything Traefik must reach joins `ai-lab` / `name: AI-LAB`. MCPJungle
 adds a second, `mcpjungle` / `name: MCPJUNGLE`, holding its Postgres and its MCP
@@ -44,56 +34,20 @@ endpoints are unauthenticated, so do not move one onto AI-LAB to "make it reacha
 — register it with the gateway instead.
 
 **Exposure — 443 is the only host port.** No service publishes one; Traefik binds
-443 alone and routes six hosts from `traefik/proxies.yml`: oracle (Open WebUI), llm
-(llama.cpp), search (SearXNG), mcp (MCPJungle), hermes (the Hermes dashboard), plus
-lmstudio — a host process via `host.docker.internal`. Every router binds `port443`
-with `certResolver: letsencrypt`, so there is no plaintext path in. Adding a `ports:`
-block anywhere re-opens one; reach for `docker compose exec` instead.
+443 alone and routes four hosts from `traefik/proxies.yml`: oracle (Open WebUI),
+search (SearXNG), mcp (MCPJungle), plus lmstudio — a host process via
+`host.docker.internal`. Every router binds `port443` with `certResolver: letsencrypt`,
+so there is no plaintext path in. Adding a `ports:` block anywhere re-opens one; reach
+for `docker compose exec` instead.
 
-TLS is not authentication, and three of these have none: `open-webui/.env` sets
-`WEBUI_AUTH=False`, llama.cpp runs with no `--api-key`, and MCPJungle defaults to
-`SERVER_MODE=development`. Anyone who resolves the hostname reaches them. Still
-trusted-LAN-only. Hermes is the one exception — password-gated at the app.
-
-**Hermes is a dashboard bolted to a gateway, and they are different processes.** The
-container's main command is `gateway run` (messaging platforms + cron); the web
-dashboard is a *separate s6-supervised service* in the same image. It stays down
-unless `HERMES_DASHBOARD` is truthy — the run script exits 0 and the finish script
-returns 125, so there is no error anywhere, just no dashboard. `gateway run` itself
-survives an empty `hermes-data/` and no platform config; it warns "No messaging
-platforms enabled" and keeps running, so a fresh install does not crashloop.
-
-Because Traefik reaches the dashboard across AI-LAB, it binds `0.0.0.0` inside the
-container, and any non-loopback bind engages the auth gate: `start_server` fails
-closed unless an auth provider is registered. `HERMES_DASHBOARD_INSECURE` has been a
-no-op since the June 2026 hardening and there is no bypass. `hermes/.env` carries the
-bundled password provider's `HERMES_DASHBOARD_BASIC_AUTH_*` keys; leave them blank and
-the container runs normally while hermes.ham51.com never answers. Store
-`_PASSWORD_HASH` (scrypt), not `_PASSWORD`, and set `_SECRET` or every restart
-invalidates all sessions.
-
-**Hermes picks its model in `hermes-data/config.yaml`, not from the environment.**
-`model.default` + the matching `custom_providers` entry are what the agent uses every
-turn; `OPENAI_BASE_URL` reaches only individual plugins. Setting the env var alone
-therefore *looks* like it worked — container up, dashboard answering, agent replying
-out of the image's built-in default. The lab's is `coder-mid` at
-`https://llm-coder-mid.ham51.com/v1`, llama.cpp on the DKR_AI_Lab2 host (a separate
-machine over the LAN, not AI-LAB), keyed by `HERMES_CUSTOM_LLM_CODER_MID_HAM51_COM_API_KEY`
-— the variable name is what `key_env:` names, so the two rename together. `https` is
-required: that Traefik binds 443 alone too. `hermes-data/` is gitignored and the
-container chowns it to uid 10000, so `hermes/config.yaml.example` is the only readable
-record of the intent, and reading the live file means `docker exec`. `./runit.sh` seeds
-config.yaml from that example when it is missing, and only then — it never overwrites,
-because Hermes rewrites the file itself. Once the container owns the directory the host
-cannot even stat inside it, so the seeder detects that and says it is skipping rather
-than misreading it as a fresh install. Verify a change
-with `docker exec hermes-agent hermes -z "Reply with exactly: MODEL OK" -t ""` — the
-config parses fine when the model name is wrong.
+TLS is not authentication, and nothing here has any: `open-webui/enc.env` sets
+`WEBUI_AUTH=False` and MCPJungle defaults to `SERVER_MODE=development`. Anyone who
+resolves the hostname reaches them. Trusted-LAN-only, with no exceptions left.
 
 **Secrets — there are no `.env` files, and `./runit.sh` is the only way in.** Each
-service commits an age-encrypted `<service>/enc.env`. `./runit.sh` decrypts all six
+service commits an age-encrypted `<service>/enc.env`. `./runit.sh` decrypts all four
 into *its own environment* and execs `docker compose` there (passing arguments
-through, so `./runit.sh ps`, `./runit.sh down`, `./runit.sh logs -f hermes` all work).
+through, so `./runit.sh ps`, `./runit.sh down`, `./runit.sh logs -f traefik` all work).
 Nothing plaintext is written to disk. The consequence is absolute: a bare `docker
 compose` command of any kind — `ps`, `down`, `config` — dies at parse time on the
 first `${VAR:?}` it cannot resolve. That error means "you forgot ./runit.sh", not
@@ -110,20 +64,18 @@ never seen by the application — no error. That is the standing cost of this de
 **Quoting in an `enc.env` is significant, and asymmetric.** Values are passed through
 literally, but one matching pair of surrounding quotes is stripped. A value containing
 `$` **must** be quoted: unquoted, the dotenv parser expands its `$`-segments as
-variables and silently mangles it. `HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH` is a
-scrypt hash of the form `scrypt$N$r$p$...` and is single-quoted for exactly this
-reason — unquoting it produces a hash that no password matches, with no error
-anywhere. This also makes eyeballing two values misleading: `open-webui/enc.env`
-quotes some values the other files leave bare, so identical secrets do not look
-identical. `runit.sh` refuses a double-quoted value containing a backslash rather
+variables and silently mangles it — a `$`-bearing secret such as a `scrypt$N$r$p$...`
+hash arrives subtly wrong, with no error anywhere. This also makes eyeballing two
+values misleading: `open-webui/enc.env` quotes some values the other files leave
+bare, so identical secrets do not look identical. `runit.sh` refuses a
+double-quoted value containing a backslash rather
 than pass through an escape it would decode differently from Compose.
 
 `.sops.yaml` encrypts by variable *name* (`KEY|TOKEN|SECRET|PASSWORD|HASH|USERNAME|
 CREDENTIAL`), leaving everything else legible. So a new secret whose name misses that
 regex is committed in the clear, and **comments are never encrypted** — a value in a
-`#` line goes to the repo plaintext. The root `.env` is out of the scheme on purpose:
-it holds only `COMPOSE_PROFILES`, host-specific and written by `detect-gpu.sh`, and
-Compose reads it directly.
+`#` line goes to the repo plaintext. There is no root `.env` at all any more: nothing
+in the project needs a project-wide Compose variable.
 
 The `enc.env.example` siblings are the documentation — they are not copied anywhere,
 they describe what an `enc.env` must contain. Still gitignore-paired with
@@ -131,45 +83,22 @@ they describe what an `enc.env` must contain. Still gitignore-paired with
 in the same commit. Name variables, never values: `CF_DNS_API_TOKEN`,
 `OPENWEBUI_OPENAI_API_KEY`, `WEBUI_SECRET_KEY`, `BRAVE_API_KEY`, `server.secret_key`.
 
-**Secrets shared between services are namespaced by service, and must stay that way.**
-All six `enc.env` files are now loaded into one flat environment, so two services
-defining the same name is a real collision rather than a latent one. `runit.sh`
-refuses it: it tracks which service claimed each name and exits with both filenames.
-So the shared names carry a service prefix in `enc.env` — `OPENWEBUI_`, `HERMES_` —
-and `open-webui/compose.yml` / `hermes/compose.yml` map them back to the plain names
-the applications read. The prefixed names stay host-side and no longer leak into the
-containers, which `env_file:` used to do.
+**Secrets that could collide are namespaced by service, and must stay that way.**
+All four `enc.env` files are loaded into one flat environment, so two services defining
+the same name is a real collision rather than a latent one. `runit.sh` refuses it: it
+tracks which service claimed each name and exits with both filenames. That is why Open
+WebUI's keys carry an `OPENWEBUI_` prefix in `enc.env` and `open-webui/compose.yml`
+maps them back to the plain `OPENAI_API_KEY` / `BRAVE_SEARCH_API_KEY` the application
+reads. Keep the prefix when adding a generically-named secret — the alternative is a
+name that works today and breaks the day another service wants it.
 
-`OPENWEBUI_OPENAI_API_KEY` and `HERMES_OPENAI_API_KEY` now hold the same value: both
-services point at `https://llm-coder-mid.ham51.com/v1` (model `coder-mid`), which
-answers 401 to any other key. They stay separate variables so either can be repointed
-without touching the other. Brave is the same shape and worth knowing before rotating:
-`OPENWEBUI_BRAVE_SEARCH_API_KEY`, `HERMES_BRAVE_SEARCH_API_KEY` and mcpjungle's
-`BRAVE_API_KEY` are three copies of the *same* value, under two names, that nothing
-keeps in step — so a rotation is three edits, and comparing them by eye is misleading
-because `open-webui/enc.env` quotes its value and the others do not.
+Brave is worth knowing before rotating: `OPENWEBUI_BRAVE_SEARCH_API_KEY` and
+mcpjungle's `BRAVE_API_KEY` are two copies of the *same* value, under different names,
+that nothing keeps in step — so a rotation is two edits, and comparing them by eye is
+misleading because `open-webui/enc.env` quotes its value and mcpjungle's does not.
 
 The age identity (`~/.config/sops/age/keys.txt`) is the only key, with no backup in
 the repo.
-
-**llama.cpp is profile-gated.** `llama.cpp/compose.yml` defines the same server twice
-— `llama-cuda` (profile `cuda`, `server-cuda`, needs the NVIDIA Container Toolkit) and
-`llama-vulkan` (profile `vulkan`, `server-vulkan`, needs a `/dev/dri` render node) —
-sharing everything else through the `x-llama-common` anchor. One definition cannot
-cover both: CUDA needs a `deploy.resources.reservations.devices` block and Vulkan needs
-`devices:`, and interpolation can substitute values but not include a block. Both carry
-the network alias `llama-gpt-oss`, so `traefik/proxies.yml` addresses either without
-change. Neither starts unless `COMPOSE_PROFILES` names its profile; `llama.cpp/detect-gpu.sh`
-writes that to the root `.env`, testing for the *runtime* in `docker info` rather than
-for hardware — this host has a stale `/dev/nvidiactl` and no NVIDIA card, so probing
-`/dev/nvidia*` would pick CUDA and fail at container start.
-
-**Docker Desktop cannot pass through a GPU.** Its containers run in a linuxkit VM with
-no `/dev/dri`, so `llama-vulkan` dies with `error gathering device information while
-adding custom device "/dev/dri"` even though the host has the node. This machine runs
-both a Desktop daemon and a native one; `docker context ls` shows which is active, and
-GPU work needs `default`. Verified on `default`: Vulkan0 = AMD Radeon 880M, and
-`LLAMA_NGL=999` measured 2.9x the prompt throughput of `LLAMA_NGL=0`.
 
 **`recommendations.md` is a review, not a to-do list** — its `searxng-valkey` finding
 is fixed, not open, and so is the `open-webui/.env` one (the four web-search lines
@@ -228,17 +157,12 @@ than treating the UI as the only record.
 
 Only `traefik:v3.7.8`, `postgres:17`, `prom/prometheus:v2.53.0`, and
 `playwright/mcp:v0.0.79` are pinned; `searxng:latest`, `open-webui:main`,
-`llama.cpp:server-cuda`, `llama.cpp:server-vulkan`, `mcpjungle:latest-stdio`,
-`mcp/brave-search:latest`, `mcp/context7:latest`, and
-`nousresearch/hermes-agent:latest` re-resolve on every pull, so rebuilds are not
-reproducible. Playwright is pinned because a bump moves both the MCP tool surface
-and the bundled Chromium; override with `PLAYWRIGHT_MCP_IMAGE_TAG`. Hermes is the
-sharpest case: a pull can swap the application *and its on-disk schemas* under
-`hermes-data/`, with no rollback. The llama.cpp images also
-publish `server-rocm` and plain `server` (CPU) if a third profile is ever wanted.
-MCPJungle needs the `-stdio` image tag specifically — it ships the `uvx` and
-`python3` that stdio servers such as `fetch` are spawned with; plain `latest` cannot
-run them.
+`mcpjungle:latest-stdio`, `mcp/brave-search:latest` and `mcp/context7:latest`
+re-resolve on every pull, so rebuilds are not reproducible. Playwright is pinned
+because a bump moves both the MCP tool surface and the bundled Chromium; override with
+`PLAYWRIGHT_MCP_IMAGE_TAG`. MCPJungle needs the `-stdio` image tag specifically — it
+ships the `uvx` and `python3` that stdio servers such as `fetch` are spawned with;
+plain `latest` cannot run them.
 
 ---
 
